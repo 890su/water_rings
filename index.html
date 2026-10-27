@@ -87,6 +87,8 @@ const ALIGN = 20;
 const PHI_ALIGN = 6;
 // Доля выравнивания для надетого кольца: висит с наклоном, но струя ещё может его выпрямить и поднять
 const PEG_ALIGN = 0.3;
+// Скорость, с которой нанизанное на верхушку кольцо переваливается поперёк штыря, рад/с
+const HOOK_FLOP = 6;
 const SPIN_REST = 0.35, SPIN_K = 0.06, SPIN_MAX = 14, SUCTION = 264;
 // Аквариум узкий: глубина чуть больше диаметра кольца. z — глубина, плюс к зрителю.
 // Кольцо, лежащее плашмя, занимает её почти целиком и не пропускает другие кольца мимо себя;
@@ -201,9 +203,11 @@ function vorticity(dt) {
     let nx = 0.5 * (Math.abs(curl[k + 1]) - Math.abs(curl[k - 1]));
     let ny = 0.5 * (Math.abs(curl[k + SX]) - Math.abs(curl[k - SX]));
     const len = Math.hypot(nx, ny) + 1e-5;
-    nx /= len; ny /= len;
-    u[k] += VORT * dt * ny * curl[k];
-    v[k] -= VORT * dt * nx * curl[k];
+    // Вихри подкручиваем только в заметном потоке: иначе подкрутка сама держит вечный вихрь,
+    // вода не успокаивается и кольца бесконечно висят в слабом течении
+    const f = VORT * dt * clamp((Math.hypot(u[k], v[k]) - 20) / 80, 0, 1) / len;
+    u[k] += f * ny * curl[k];
+    v[k] -= f * nx * curl[k];
   }
 }
 
@@ -415,7 +419,7 @@ function makeRing(x, y, ang, D, col, ci) {
     a: { x: x - hx, y: y - hy, px: x - hx, py: y - hy },
     b: { x: x + hx, y: y + hy, px: x + hx, py: y + hy },
     D, col, dark: shade(col, 0.6), ci, on: -1, shown: -1, tinkT: 0,
-    phi: SPIN_REST + (Math.random() < 0.5 ? 0 : Math.PI), om: 0, z: 0, pz: 0,
+    phi: SPIN_REST + (Math.random() < 0.5 ? 0 : Math.PI), om: 0, z: 0, pz: 0, hook: -1, support: false,
     mark: pegs.map(() => false), eng: pegs.map(() => false)
   };
   updateDepth(R);
@@ -432,6 +436,8 @@ function updateDepth(R) {
   R.zHole = Math.max(0, c - RIM - PEG_R);
 }
 const engaged = R => R.on >= 0 || R.eng[0] || R.eng[1];
+// Наклон «плашмя» к зрителю: при наклоне телефона на себя / от себя кольца ложатся плашмя к новому «низу»
+const phiRest = () => SPIN_REST - Math.atan2(grav.z, Math.max(0.1, Math.hypot(grav.x, grav.y)));
 const zLim = R => engaged(R) ? R.zHole : R.zWall;
 
 function spawnRings(n, D, duo) {
@@ -463,7 +469,7 @@ function integrateRing(R, dt) {
   }
   // Кольцо выравнивается поперёк силы тяжести — при наклоне телефона ложится по новому «низу».
   // Надетое — лишь слегка: иначе висит ребром к струе, и вода не может поднять его со штыря
-  const level = (onPeg ? PEG_ALIGN : 1) * ((R.a.x - R.b.x) * grav.x + (R.a.y - R.b.y) * grav.y) * ALIGN * dt;
+  const level = (onPeg && !R.support && !R.ground ? PEG_ALIGN : 1) * ((R.a.x - R.b.x) * grav.x + (R.a.y - R.b.y) * grav.y) * ALIGN * dt;
   for (let n = 0; n < 2; n++) {
     const p = n ? R.b : R.a, lv = n ? level : -level;
     let vx = (p.x - p.px) / dt + lv * grav.x, vy = (p.y - p.py) / dt;
@@ -504,7 +510,7 @@ function collideStatic(p, R) {
   const md = RIM + PEG_R;
   for (let k = 0; k < pegs.length; k++) {
     const g = pegs[k];
-    if (!R.eng[k]) continue;
+    if (!R.eng[k] || R.hook === k) continue;
     if (p.y < g.tip) {
       const dx = p.x - g.x, dy = p.y - g.tip, d2 = dx * dx + dy * dy;
       if (d2 >= md * md) continue;
@@ -515,29 +521,73 @@ function collideStatic(p, R) {
     } else {
       const stop = g.bottom - RIM - 3;
       if (p.y > stop) { p.y = stop; p.c = 1; }
-      const dx = p.x - g.x;
-      if (Math.abs(dx) >= md) continue;
+      // Штырь в дырке: края кольца всегда по разные стороны стержня — вбок кольцо не соскользнёт,
+      // сойти со штыря можно только через верхушку
       const other = p === R.a ? R.b : R.a;
-      const side = Math.abs(dx) > 1e-3 ? Math.sign(dx) : (other.x < g.x ? 1 : -1);
-      p.x = g.x + side * md;
+      // Мягко, не больше 3 px за итерацию: если кольцо всё же оказалось сбоку, оно не перескочит через штырь рывком
+      const left = p.x < other.x || (p.x === other.x && p === R.a);
+      if (left) { if (p.x > g.x - md) p.x -= Math.min(3, p.x - (g.x - md)); } else if (p.x < g.x + md) p.x += Math.min(3, g.x + md - p.x);
     }
   }
 }
 
-// Штырь заходит в дырку, только если кольцо пришло сверху, лежит достаточно плашмя
-// и не сдвинуто по глубине так, что штырь упрётся в обод. Повёрнутое к зрителю кольцо не наденется.
+// Проходит ли штырь сквозь дырку кольца — честно в объёме: кольцо — круг с осью a-b, повёрнутый к зрителю на phi.
+// fromTop — только у самой верхушки: так кольцо может нанизаться, а ниже верхушки сбоку его не пустит обод
+// tol — запас к радиусу дырки: надетое кольцо держим чуть дольше, чтобы оно не дребезжало на границе
+function holeHasPeg(R, g, fromTop, tol = 0) {
+  const L = Math.hypot(R.b.x - R.a.x, R.b.y - R.a.y) || 1, tx = (R.b.x - R.a.x) / L, ty = (R.b.y - R.a.y) / L;
+  const c = Math.cos(R.phi), nx = ty * c, ny = -tx * c, nz = Math.sin(R.phi);
+  const cx = (R.a.x + R.b.x) / 2, cy = (R.a.y + R.b.y) / 2, dx = g.x - cx, rin = R.D / 2 - RIM - PEG_R + tol;
+  if (Math.abs(ny) > 0.2) {
+    const y = cy - (nx * dx - nz * R.z) / ny;
+    return y >= g.tip - 2 && y <= (fromTop ? g.tip + rin : g.bottom) && Math.hypot(dx, y - cy, R.z) < rin;
+  }
+  // Кольцо стоит почти вертикально: штырь должен лежать в его плоскости (с допуском на толщину обода —
+  // упёршись в обод изнутри, кольцо доворачивается), а верхушка — войти в дырку
+  if (Math.abs(nx * dx - nz * R.z) > PEG_R + RIM) return false;
+  const h = Math.hypot(dx, R.z);
+  if (h >= rin) return false;
+  const half = Math.sqrt(rin * rin - h * h);
+  return g.tip < cy + half && (!fromTop || g.tip > cy - half);
+}
+
+// Нанизанное на верхушку кольцо (хоть стоймя) повисает на ней и под своим весом переваливается
+// поперёк штыря — дальше оно уже обычное надетое
+function flopRing(R, g, dt) {
+  const cx = (R.a.x + R.b.x) / 2, cy = (R.a.y + R.b.y) / 2, step = HOOK_FLOP * dt;
+  const e = (Math.atan2(R.b.y - R.a.y, R.b.x - R.a.x) % Math.PI + Math.PI * 1.5) % Math.PI - Math.PI / 2;
+  const r = -Math.sign(e) * Math.min(Math.abs(e), step), c = Math.cos(r), s = Math.sin(r);
+  const pull = (g.x - cx) * Math.min(1, 8 * dt);
+  for (const p of [R.a, R.b]) {
+    let rx = p.x - cx, ry = p.y - cy;
+    p.x = cx + pull + rx * c - ry * s; p.y = cy + rx * s + ry * c;
+    rx = p.px - cx; ry = p.py - cy;
+    p.px = cx + pull + rx * c - ry * s; p.py = cy + rx * s + ry * c;
+  }
+  const rest = ((phiRest() - R.phi) % Math.PI + Math.PI * 1.5) % Math.PI - Math.PI / 2;
+  R.phi += clamp(rest, -step, step); R.om *= 0.5;
+  shiftZ(R, -R.z * Math.min(1, 8 * dt));
+}
+
+// Штырь заходит в дырку, если кольцо пришло сверху, лежит достаточно плашмя и не сдвинуто по глубине так,
+// что штырь упрётся в обод, — или если верхушка попала в дырку кольца, как бы оно ни стояло (нанизывание)
 function updateThread(R) {
   const lo = Math.min(R.a.x, R.b.x), hi = Math.max(R.a.x, R.b.x);
   const aligned = Math.abs(R.z) <= R.zHole && R.zHole > 0;
   for (let k = 0; k < pegs.length; k++) {
     const g = pegs[k];
     const straddle = lo < g.x - PEG_R && hi > g.x + PEG_R;
-    if (R.on === k && R.a.y < g.tip && R.b.y < g.tip) R.on = -1;
+    // Надето, пока стержень проходит сквозь дырку: наклонённое кольцо сходит, как только дырка поднялась над верхушкой
+    if (R.on === k && ((R.a.y < g.tip && R.b.y < g.tip) || !holeHasPeg(R, g, false, 1.5))) R.on = -1;
     if (R.a.y < g.tip - RIM && R.b.y < g.tip - RIM) R.mark[k] = true;
     else if (!straddle) R.mark[k] = false;
+    if (R.hook === k) {
+      if (straddle && Math.abs(R.b.y - R.a.y) < R.D * 0.5) { R.hook = -1; R.mark[k] = true; }
+      else if (!holeHasPeg(R, g, false, 3)) R.hook = -1;
+    } else if (R.hook < 0 && R.on < 0 && !R.eng[k] && holeHasPeg(R, g, true)) { R.hook = k; R.mark[k] = true; }
     const cross = straddle ? R.a.y + (R.b.y - R.a.y) * (g.x - R.a.x) / (R.b.x - R.a.x) : H;
-    R.eng[k] = R.on === k || (straddle && R.mark[k] && (R.eng[k] || (aligned && cross < g.tip + 2 * RIM)));
-    if (R.on < 0 && R.eng[k] && R.a.y > g.tip + 1 && R.b.y > g.tip + 1) R.on = k;
+    R.eng[k] = R.on === k || R.hook === k || (straddle && R.mark[k] && (R.eng[k] || (aligned && cross < g.tip + 2 * RIM)));
+    if (R.on < 0 && R.hook < 0 && R.eng[k] && R.a.y > g.tip + 1 && R.b.y > g.tip + 1) R.on = k;
   }
 }
 
@@ -604,6 +654,8 @@ function ringPair(A, B) {
   const h = (md - d) / 2;
   pushRing(A, s, -nx * h, -ny * h);
   pushRing(B, t, nx * h, ny * h);
+  // Надетые на один штырь: верхнее лежит на нижнем — значит, может выровняться в стопку
+  if (A.on >= 0 && A.on === B.on && Math.abs(ny) > 0.7) (ny > 0 ? A : B).support = true;
 }
 
 // Незацепленное кольцо и штырь: стержень с верхушкой твёрдые, если кольцо не ушло мимо по глубине
@@ -637,7 +689,15 @@ function collidePegs(R) {
 }
 
 function physics(dt) {
-  for (const R of rings) { updateDepth(R); integrateRing(R, dt); }
+  for (const R of rings) {
+    updateDepth(R); integrateRing(R, dt); R.support = false;
+    // Верхушка вошла в дырку — кольцо нанизано, и стержень его больше не отталкивает
+    // (проверяем до столкновений, иначе стержень успеет развернуть кольцо и отодвинуть его)
+    if (R.hook < 0 && R.on < 0) for (let k = 0; k < pegs.length; k++) {
+      if (!R.eng[k] && holeHasPeg(R, pegs[k], true)) { R.hook = k; R.mark[k] = R.eng[k] = true; break; }
+    }
+    if (R.hook >= 0) flopRing(R, pegs[R.hook], dt);
+  }
   for (let it = 0; it < 4; it++) {
     for (const R of rings) {
       const dx = R.b.x - R.a.x, dy = R.b.y - R.a.y, d = Math.hypot(dx, dy) || 1e-6, k = (d - R.D) / d * 0.5;
@@ -669,10 +729,12 @@ function updateSpin(R, dt) {
   const target = clamp(-sample(curl, cx, cy) * SPIN_K, -SPIN_MAX, SPIN_MAX);
   R.om += (target - R.om) * (1 - Math.exp(-3 * dt)) + (Math.random() - 0.5) * rel * 0.02;
   // Тонущее кольцо и само разворачивается плашмя, но вихрь его легко перебарывает; легшее на дно — ложится плашмя сразу.
-  // Надетое висит как повисло (трение о стержень гасит вращение) и ложится плашмя, только опустившись на подставку
-  const rest = ((SPIN_REST - R.phi) % Math.PI + Math.PI * 1.5) % Math.PI - Math.PI / 2;
-  if (R.on >= 0 && Math.max(R.a.y, R.b.y) < pegs[R.on].bottom - RIM - 4) R.om *= Math.exp(-6 * dt);
-  else if (R.on >= 0 || (speed < 25 && R.ground)) {
+  // Надетое висит как повисло (трение о стержень гасит вращение), а легши на полку или на кольцо под ним —
+  // выравнивается в ровную стопку. «Плашмя» — относительно силы тяжести, с учётом наклона телефона
+  const rest = ((phiRest() - R.phi) % Math.PI + Math.PI * 1.5) % Math.PI - Math.PI / 2;
+  const settled = R.on >= 0 && (R.support || R.ground);
+  if (R.on >= 0 && !settled) R.om *= Math.exp(-6 * dt);
+  else if (settled || (speed < 25 && R.ground)) {
     R.om += rest * 40 * dt;
     R.om *= Math.exp(-6 * dt);
   } else R.om += rest * PHI_ALIGN * dt;
