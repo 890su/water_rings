@@ -40,7 +40,8 @@
   <button data-mode="classic">Классика</button><div class="small" id="best-classic"></div>
   <button data-mode="colors" class="alt">Два цвета</button><div class="small" id="best-colors"></div>
   <button data-mode="waves" class="green">Волны</button><div class="small" id="best-waves"></div>
-  <p class="small">На компьютере: A / L или стрелки, с Shift — сильнее</p>
+  <button id="tiltBtn" class="ghost hidden"></button>
+  <p class="small">На компьютере: A / L или стрелки, с Shift — сильнее; Q / E — наклон, пробел — встряска</p>
 </div>
 
 <div id="pause" class="overlay hidden">
@@ -65,13 +66,20 @@
 // ---------- Мир ----------
 const W = 360, H = 648, CELL = 12, NX = W / CELL, NY = H / CELL, SX = NX + 2, NCELLS = (NX + 2) * (NY + 2);
 const RIM = 5, RING_D = 34, PEG_R = 3.5, G = 220, K_PAR = 1.6, K_PERP = 5.5, MAXV = 800;
-const JET = 620, JET_LEN = 340, JET_W0 = 34, JET_SPREAD = 0.24, DRAIN = 1.1, REFILL = 1.3, VORT = 5, FLUID_DAMP = 0.6;
+// Насос набирает воду заметно быстрее, чем выдаёт её, — как у настоящей игрушки
+const JET = 620, JET_LEN = 340, JET_W0 = 34, JET_SPREAD = 0.24, DRAIN = 1.1, REFILL = 4, VORT = 5, FLUID_DAMP = 0.6;
 // Надетое кольцо трётся о штырь и частично прикрыто им от потока — чтобы его не сдувало каждым нажатием
-const PEG_SHELTER = 0.7, PEG_FRICTION = 3;
+const PEG_SHELTER = 0.7, PEG_FRICTION = 3, PEG_BIND = 3, PEG_DRAG = 6, PEG_TWIST = 0.05;
 // Видимое кувыркание кольца вокруг своей оси: phi — угол наклона к зрителю
 // Тонущее плоское кольцо стремится лечь горизонтально (главный рычаг сложности)
 const ALIGN = 20;
-const SPIN_REST = 0.35, SPIN_K = 0.06, SPIN_MAX = 14, SUCTION = 140;
+// То же для наклона к зрителю: без него кувыркающееся кольцо почти не попадает на штырь
+const PHI_ALIGN = 6;
+const SPIN_REST = 0.35, SPIN_K = 0.06, SPIN_MAX = 14, SUCTION = 220;
+// Аквариум узкий: глубина чуть больше диаметра кольца. z — глубина, плюс к зрителю.
+// Кольцо, лежащее плашмя, занимает её почти целиком и не пропускает другие кольца мимо себя;
+// разойтись по глубине могут только кольца, повёрнутые к зрителю.
+const TANK_Z = 25, Z_DAMP = 2.5, Z_JITTER = 0.5;
 const STEP = 1 / 60, SUB = 2;
 const PEG_TIP = 330, PEG_BOTTOM = H - 150;
 // Дно-горка как у игрушки: кольца скатываются к соплам
@@ -83,7 +91,9 @@ const floorY = x => {
   }
   return H;
 };
-const pegs = [{ x: 120, tip: PEG_TIP, bottom: PEG_BOTTOM }, { x: 240, tip: PEG_TIP, bottom: PEG_BOTTOM }];
+// Раскладка штырей — заготовка под уровни: штыри симметричны, PEG_X — расстояние от левой стенки
+const PEG_X = 110;
+const pegs = [{ x: PEG_X, tip: PEG_TIP, bottom: PEG_BOTTOM }, { x: W - PEG_X, tip: PEG_TIP, bottom: PEG_BOTTOM }];
 const nozzles = [mkNozzle(66, H - 6, 0.3), mkNozzle(W - 66, H - 6, -0.3)];
 const PALETTE = ['#ff4d6d', '#ffd23f', '#3ddc97', '#4cc9f0', '#b388ff', '#ff9f1c', '#f15bb5', '#9ef01a'];
 const DUO = ['#ff3b5c', '#2f7dff'];
@@ -163,7 +173,20 @@ function vorticity(dt) {
   }
 }
 
+// Штырь тонкий и поток почти не держит, но подтормаживает воду вдоль стержня — за ним срываются завихрения
+function pegWake(dt) {
+  const e = 1 - Math.exp(-PEG_DRAG * dt);
+  for (const g of pegs) {
+    const gx = g.x / CELL + 0.5, i0 = gx | 0, s = gx - i0;
+    for (let j = Math.floor(g.tip / CELL) + 1; j <= Math.floor(g.bottom / CELL) + 1; j++) {
+      const k = IX(i0, j), f0 = 1 - e * (1 - s), f1 = 1 - e * s;
+      u[k] *= f0; v[k] *= f0; u[k + 1] *= f1; v[k + 1] *= f1;
+    }
+  }
+}
+
 function fluidStep(dt) {
+  pegWake(dt);
   vorticity(dt);
   const damp = Math.exp(-FLUID_DAMP * dt);
   for (let k = 0; k < NCELLS; k++) { u[k] *= damp; v[k] *= damp; }
@@ -234,6 +257,92 @@ function suck(side, k) {
   }
 }
 
+// ---------- Наклон и встряска телефона ----------
+// grav — сила тяжести в осях аквариума в долях G: x, y — в плоскости, z — к переднему стеклу.
+// Отсчёт от того, как телефон держали при старте партии: так держат — кольца тонут вниз как обычно;
+// повернул — «низ» поворачивается, перевернул — кольца падают к крышке, положил плашмя — ложатся на стекло.
+// Вода в полном аквариуме от наклона не течёт, тонут по нему только кольца.
+// shake — ускорение колец относительно аквариума при встряске, px/с²: аквариум дёрнулся — кольца отстали.
+const TILT_Z = 0.8, SHAKE_K = 250, SHAKE_DEAD = 2.5;
+const grav = { x: 0, y: 1, z: 0 }, shake = { x: 0, y: 0, z: 0 };
+const motion = { on: true, listening: false, sign: 0, tx: 0, ty: 1, tz: 0, m0: null, z0: null, keyTilt: 0, lp: null };
+
+// Оси устройства (x вправо, y к верху корпуса, z к зрителю) → оси экрана (x вправо, y вниз, z к зрителю)
+function screenAxes(x, y, z) {
+  const deg = screen.orientation ? screen.orientation.angle : (window.orientation || 0), a = deg * Math.PI / 180;
+  const c = Math.cos(a), s = Math.sin(a);
+  return [x * c - y * s, -(x * s + y * c), z];
+}
+
+function onMotion(e) {
+  const g = e.accelerationIncludingGravity;
+  if (!motion.on || !g || g.x == null) return;
+  const [x, y, z] = screenAxes(g.x, g.y, g.z);
+  // Android и iOS расходятся в знаке. Телефон держат верхом вверх — по первому замеру и выбираем знак
+  if (!motion.sign) { if (Math.hypot(x, y) < 4) return; motion.sign = y < 0 ? -1 : 1; }
+  const dx = motion.sign * x, dy = motion.sign * y, dz = motion.sign * z / 9.81, m = Math.hypot(dx, dy);
+  if (motion.m0 == null) { motion.m0 = Math.max(m, 4); motion.z0 = dz; }
+  // Сила в плоскости — в долях от той, что была при старте; почти плашмя направление ненадёжно, его не трогаем
+  const k = Math.min(1, m / motion.m0);
+  if (m > 1.5) { motion.tx = dx / m * k; motion.ty = dy / m * k; }
+  else { const l = Math.hypot(motion.tx, motion.ty) || 1; motion.tx *= k / l; motion.ty *= k / l; }
+  motion.tz = clamp(dz - motion.z0, -1, 1) * TILT_Z;
+
+  let lx, ly, lz;
+  const a = e.acceleration;
+  if (a && a.x != null) [lx, ly, lz] = screenAxes(a.x, a.y, a.z);
+  else {
+    // Нет ускорения без гравитации — выделяем рывки фильтром из полного
+    if (!motion.lp) motion.lp = [x, y, z];
+    const lp = motion.lp;
+    lp[0] += (x - lp[0]) * 0.1; lp[1] += (y - lp[1]) * 0.1; lp[2] += (z - lp[2]) * 0.1;
+    lx = x - lp[0]; ly = y - lp[1]; lz = z - lp[2];
+  }
+  const mag = Math.hypot(lx, ly, lz);
+  if (mag > SHAKE_DEAD) {
+    const f = (mag - SHAKE_DEAD) / mag * SHAKE_K * motion.sign;
+    shake.x = lx * f; shake.y = ly * f; shake.z = lz * f * 0.3;
+  }
+}
+
+function enableMotion() {
+  if (motion.listening || !window.DeviceMotionEvent) return;
+  motion.listening = true;
+  const listen = () => window.addEventListener('devicemotion', onMotion);
+  if (typeof DeviceMotionEvent.requestPermission === 'function') {
+    DeviceMotionEvent.requestPermission().then(s => { if (s === 'granted') listen(); else motion.listening = false; })
+      .catch(() => { motion.listening = false; });
+  } else listen();
+}
+
+function resetMotion() {
+  grav.x = 0; grav.y = 1; grav.z = 0; shake.x = shake.y = shake.z = 0;
+  motion.tx = 0; motion.ty = 1; motion.tz = 0; motion.m0 = motion.z0 = null;
+}
+
+// Вихрь радиусом r: встряска взбалтывает воду у стенок
+function swirl(x, y, s, r) {
+  for (let j = 1; j <= NY; j++) for (let i = 1; i <= NX; i++) {
+    const rx = (i - 0.5) * CELL - x, ry = (j - 0.5) * CELL - y, d = Math.hypot(rx, ry);
+    if (d >= r) continue;
+    const k = IX(i, j), f = s * (1 - d / r) / r;
+    u[k] -= ry * f; v[k] += rx * f;
+  }
+}
+
+function updateMotion(dt) {
+  let tx = motion.on ? motion.tx : 0, ty = motion.on ? motion.ty : 1;
+  if (motion.keyTilt) { tx = Math.sin(motion.keyTilt * 0.5); ty = Math.cos(motion.keyTilt * 0.5); }
+  const k = 1 - Math.exp(-12 * dt);
+  grav.x += (tx - grav.x) * k; grav.y += (ty - grav.y) * k; grav.z += ((motion.on ? motion.tz : 0) - grav.z) * k;
+  const s = Math.hypot(shake.x, shake.y);
+  if (s > 1200 && Math.random() < 0.25) {
+    swirl(30 + Math.random() * (W - 60), 60 + Math.random() * (H - 160), (Math.random() < 0.5 ? -1 : 1) * Math.min(s, 6000) * 0.08, 50);
+  }
+  const e = Math.exp(-30 * dt);
+  shake.x *= e; shake.y *= e; shake.z *= e;
+}
+
 // ---------- Кольца ----------
 // Кольцо в профиль = два "сечения обода" (частицы), жёстко связанные на расстоянии D.
 // Штырь проходит между ними, только если кольцо достаточно горизонтально и попало точно.
@@ -241,14 +350,28 @@ let rings = [];
 
 function makeRing(x, y, ang, D, col, ci) {
   const hx = Math.cos(ang) * D / 2, hy = Math.sin(ang) * D / 2;
-  return {
+  const R = {
     a: { x: x - hx, y: y - hy, px: x - hx, py: y - hy },
     b: { x: x + hx, y: y + hy, px: x + hx, py: y + hy },
     D, col, dark: shade(col, 0.6), ci, on: -1, shown: -1, tinkT: 0,
-    phi: SPIN_REST + (Math.random() < 0.5 ? 0 : Math.PI), om: 0,
+    phi: SPIN_REST + (Math.random() < 0.5 ? 0 : Math.PI), om: 0, z: 0, pz: 0,
     mark: pegs.map(() => false), eng: pegs.map(() => false)
   };
+  updateDepth(R);
+  R.z = R.pz = (Math.random() * 2 - 1) * R.zWall;
+  return R;
 }
+
+// hz — полутолщина кольца по глубине; zWall — насколько можно сдвинуться от середины до стекла;
+// zHole — насколько надетое кольцо может сместиться вглубь, пока штырь остаётся в дырке
+function updateDepth(R) {
+  const c = R.D / 2 * Math.abs(Math.cos(R.phi));
+  R.hz = c + RIM;
+  R.zWall = Math.max(0, TANK_Z - R.hz);
+  R.zHole = Math.max(0, c - RIM - PEG_R);
+}
+const engaged = R => R.on >= 0 || R.eng[0] || R.eng[1];
+const zLim = R => engaged(R) ? R.zHole : R.zWall;
 
 function spawnRings(n, D, duo) {
   for (let i = 0; i < n; i++) {
@@ -269,28 +392,38 @@ function integrateRing(R, dt) {
   let tx = R.b.x - R.a.x, ty = R.b.y - R.a.y;
   const L = Math.hypot(tx, ty) || 1; tx /= L; ty /= L;
   const ePar = Math.exp(-K_PAR * dt), ePerp = Math.exp(-K_PERP * dt);
-  const onPeg = R.on >= 0, shelter = onPeg ? PEG_SHELTER : 1, rub = onPeg ? Math.exp(-PEG_FRICTION * dt) : 1;
-  const level = (R.a.y - R.b.y) * ALIGN * dt;
+  const onPeg = R.on >= 0, shelter = onPeg ? PEG_SHELTER : 1;
+  // Надетое кольцо выравниваться не стремится, а висит на штыре с наклоном —
+  // и чем сильнее наклонено (в плоскости или к зрителю), тем сильнее закусывает стержень
+  let rub = 1;
+  if (onPeg) {
+    const dp = (R.phi % Math.PI + Math.PI * 1.5) % Math.PI - Math.PI / 2;
+    rub = Math.exp(-PEG_FRICTION * (1 + PEG_BIND * Math.hypot((R.a.y - R.b.y) / R.D, Math.sin(dp))) * dt);
+  }
+  // Свободное кольцо выравнивается поперёк силы тяжести — при наклоне телефона ложится по новому «низу»
+  const level = onPeg ? 0 : ((R.a.x - R.b.x) * grav.x + (R.a.y - R.b.y) * grav.y) * ALIGN * dt;
   for (let n = 0; n < 2; n++) {
-    const p = n ? R.b : R.a;
-    let vx = (p.x - p.px) / dt, vy = (p.y - p.py) / dt;
-    vy = vy * rub + (n ? level : -level);
+    const p = n ? R.b : R.a, lv = n ? level : -level;
+    let vx = (p.x - p.px) / dt + lv * grav.x, vy = (p.y - p.py) / dt;
+    vy = vy * rub + lv * grav.y;
     const fu = sample(u, p.x, p.y) * shelter, fv = sample(v, p.x, p.y) * shelter;
     // Сопротивление воды: плашмя кольцо тормозится сильнее, чем ребром — отсюда "планирование"
     const rx = vx - fu, ry = vy - fv, par = rx * tx + ry * ty;
     const ax = par * tx, ay = par * ty;
-    vx = fu + ax * ePar + (rx - ax) * ePerp;
-    vy = fv + ay * ePar + (ry - ay) * ePerp + G * dt;
+    vx = fu + ax * ePar + (rx - ax) * ePerp + (G * grav.x + shake.x) * dt;
+    vy = fv + ay * ePar + (ry - ay) * ePerp + (G * grav.y + shake.y) * dt;
     const sp = Math.hypot(vx, vy);
     if (sp > MAXV) { vx *= MAXV / sp; vy *= MAXV / sp; }
     p.px = p.x; p.py = p.y;
     p.x += vx * dt; p.y += vy * dt;
   }
+  // Поток плоский и вглубь не толкает: по z кольцо движется от соседей, стёкол, наклона и встряски
+  const vz = (R.z - R.pz) * Math.exp(-Z_DAMP * dt) + (G * grav.z + shake.z) * dt * dt;
+  R.pz = R.z; R.z += vz;
 }
 
-// Игра плоская, а игрушка объёмная: стержень штыря держит только "зацепленное" кольцо
-// (надетое или заходящее на штырь сверху), остальные проплывают перед ним.
-// Верхушка штыря твёрдая для всех — об неё кольца отскакивают.
+// Зацепленное кольцо (надетое или заходящее на штырь сверху) держится на стержне здесь.
+// Остальные сталкиваются со штырём целиком в collidePegs — если не разошлись с ним по глубине.
 function collideStatic(p, R) {
   if (p.x < RIM) p.x = RIM; else if (p.x > W - RIM) p.x = W - RIM;
   if (p.y < RIM) p.y = RIM; else if (p.y > H - RIM) p.y = H - RIM;
@@ -309,6 +442,7 @@ function collideStatic(p, R) {
   const md = RIM + PEG_R;
   for (let k = 0; k < pegs.length; k++) {
     const g = pegs[k];
+    if (!R.eng[k]) continue;
     if (p.y < g.tip) {
       const dx = p.x - g.x, dy = p.y - g.tip, d2 = dx * dx + dy * dy;
       if (d2 >= md * md) continue;
@@ -316,7 +450,7 @@ function collideStatic(p, R) {
       let nx, ny;
       if (d < 1e-6) { nx = p.px < g.x ? -1 : 1; ny = 0; } else { nx = dx / d; ny = dy / d; }
       p.x = g.x + nx * md; p.y = g.tip + ny * md;
-    } else if (R.eng[k]) {
+    } else {
       const stop = g.bottom - RIM - 3;
       if (p.y > stop) { p.y = stop; p.c = 1; }
       const dx = p.x - g.x;
@@ -328,42 +462,111 @@ function collideStatic(p, R) {
   }
 }
 
+// Штырь заходит в дырку, только если кольцо пришло сверху, лежит достаточно плашмя
+// и не сдвинуто по глубине так, что штырь упрётся в обод. Повёрнутое к зрителю кольцо не наденется.
 function updateThread(R) {
   const lo = Math.min(R.a.x, R.b.x), hi = Math.max(R.a.x, R.b.x);
+  const aligned = Math.abs(R.z) <= R.zHole && R.zHole > 0;
   for (let k = 0; k < pegs.length; k++) {
     const g = pegs[k];
     const straddle = lo < g.x - PEG_R && hi > g.x + PEG_R;
     if (R.on === k && R.a.y < g.tip && R.b.y < g.tip) R.on = -1;
     if (R.a.y < g.tip - RIM && R.b.y < g.tip - RIM) R.mark[k] = true;
     else if (!straddle) R.mark[k] = false;
-    if (R.on < 0 && straddle && R.mark[k] && R.a.y > g.tip + 1 && R.b.y > g.tip + 1) R.on = k;
-    R.eng[k] = R.on === k || (straddle && R.mark[k]);
+    const cross = straddle ? R.a.y + (R.b.y - R.a.y) * (g.x - R.a.x) / (R.b.x - R.a.x) : H;
+    R.eng[k] = R.on === k || (straddle && R.mark[k] && (R.eng[k] || (aligned && cross < g.tip + 2 * RIM)));
+    if (R.on < 0 && R.eng[k] && R.a.y > g.tip + 1 && R.b.y > g.tip + 1) R.on = k;
   }
 }
 
-function rimPair(p, q) {
-  const dx = q.x - p.x, dy = q.y - p.y, d2 = dx * dx + dy * dy, md = 2 * RIM;
-  if (d2 >= md * md || d2 < 1e-8) return;
-  const d = Math.sqrt(d2), k = (md - d) / d * 0.5;
-  p.x -= dx * k; p.y -= dy * k; q.x += dx * k; q.y += dy * k;
+// Ближайшие точки отрезков AB и CD: параметры s на AB и t на CD (Ericson, RTCD 5.1.9)
+const SEG = { s: 0, t: 0 };
+function segParams(ax, ay, bx, by, cx, cy, dx, dy) {
+  const d1x = bx - ax, d1y = by - ay, d2x = dx - cx, d2y = dy - cy, rx = ax - cx, ry = ay - cy;
+  const a = d1x * d1x + d1y * d1y, e = d2x * d2x + d2y * d2y, f = d2x * rx + d2y * ry;
+  const c = d1x * rx + d1y * ry, b = d1x * d2x + d1y * d2y, den = a * e - b * b;
+  let s = den > 1e-9 ? clamp((b * f - c * e) / den, 0, 1) : 0, t = (b * s + f) / e;
+  if (t < 0) { t = 0; s = clamp(-c / a, 0, 1); } else if (t > 1) { t = 1; s = clamp((b - c) / a, 0, 1); }
+  SEG.s = s; SEG.t = t;
+}
+
+// Сдвинуть точку отрезка-кольца с параметром s на (dx, dy), раздав сдвиг двум концам
+function pushRing(R, s, dx, dy) {
+  const w = 1 / ((1 - s) * (1 - s) + s * s);
+  R.a.x += dx * w * (1 - s); R.a.y += dy * w * (1 - s);
+  R.b.x += dx * w * s; R.b.y += dy * w * s;
+}
+
+// Кольцо — отрезок толщиной в обод. Разминуться можно в плоскости или по глубине;
+// выбираем путь короче, если стёкла (или штырь в дырке) оставляют для него место.
+function ringPair(A, B) {
+  const dz = B.z - A.z, sg = dz < 0 ? -1 : 1, penZ = A.hz + B.hz - Math.abs(dz);
+  if (penZ <= 0) return;
+  segParams(A.a.x, A.a.y, A.b.x, A.b.y, B.a.x, B.a.y, B.b.x, B.b.y);
+  const s = SEG.s, t = SEG.t;
+  const px = A.a.x + (A.b.x - A.a.x) * s, py = A.a.y + (A.b.y - A.a.y) * s;
+  let nx = B.a.x + (B.b.x - B.a.x) * t - px, ny = B.a.y + (B.b.y - B.a.y) * t - py;
+  const d = Math.hypot(nx, ny), md = 2 * RIM;
+  if (d >= md) return;
+  const roomA = Math.max(0, zLim(A) + sg * A.z), roomB = Math.max(0, zLim(B) - sg * B.z);
+  if (penZ < md - d && penZ <= roomA + roomB) {
+    const mA = Math.min(roomA, Math.max(penZ / 2, penZ - roomB));
+    A.z -= sg * mA; B.z += sg * (penZ - mA);
+    return;
+  }
+  if (d < 1e-6) {
+    nx = A.a.y - A.b.y; ny = A.b.x - A.a.x;
+    if (nx * ((B.a.x + B.b.x) - (A.a.x + A.b.x)) + ny * ((B.a.y + B.b.y) - (A.a.y + A.b.y)) < 0) { nx = -nx; ny = -ny; }
+    const l = Math.hypot(nx, ny) || 1; nx /= l; ny /= l;
+  } else { nx /= d; ny /= d; }
+  const h = (md - d) / 2;
+  pushRing(A, s, -nx * h, -ny * h);
+  pushRing(B, t, nx * h, ny * h);
+}
+
+// Незацепленное кольцо и штырь: стержень с верхушкой твёрдые, если кольцо не ушло мимо по глубине
+function collidePegs(R) {
+  for (let k = 0; k < pegs.length; k++) {
+    if (R.eng[k]) continue;
+    const g = pegs[k], penZ = R.hz + PEG_R - Math.abs(R.z);
+    if (penZ <= 0) continue;
+    segParams(R.a.x, R.a.y, R.b.x, R.b.y, g.x, g.tip, g.x, g.bottom);
+    const s = SEG.s, qy = g.tip + (g.bottom - g.tip) * SEG.t;
+    let nx = R.a.x + (R.b.x - R.a.x) * s - g.x, ny = R.a.y + (R.b.y - R.a.y) * s - qy;
+    const d = Math.hypot(nx, ny), md = RIM + PEG_R;
+    if (d >= md) continue;
+    const side = R.z < 0 ? -1 : 1;
+    if (penZ < md - d && penZ <= R.zWall - Math.abs(R.z)) { R.z += side * penZ; continue; }
+    if (d < 1e-6) { nx = (R.a.x + R.b.x) / 2 < g.x ? -1 : 1; ny = 0; } else { nx /= d; ny /= d; }
+    pushRing(R, s, nx * (md - d), ny * (md - d));
+    // Упёршись в стержень краем, кольцо проворачивается к зрителю и соскальзывает за штырь или перед ним
+    const dp = (R.phi % Math.PI + Math.PI * 1.5) % Math.PI - Math.PI / 2, tw = (dp < 0 ? -1 : 1) * (md - d) * PEG_TWIST;
+    R.phi += tw; R.om += tw * 30;
+    R.z += side * (md - d) * 0.5;
+  }
 }
 
 function physics(dt) {
-  for (const R of rings) integrateRing(R, dt);
+  for (const R of rings) { updateDepth(R); integrateRing(R, dt); }
   for (let it = 0; it < 4; it++) {
     for (const R of rings) {
       const dx = R.b.x - R.a.x, dy = R.b.y - R.a.y, d = Math.hypot(dx, dy) || 1e-6, k = (d - R.D) / d * 0.5;
       R.a.x += dx * k; R.a.y += dy * k; R.b.x -= dx * k; R.b.y -= dy * k;
     }
-    for (const R of rings) { collideStatic(R.a, R); collideStatic(R.b, R); }
-    for (let i = 0; i < rings.length; i++) for (let j = i + 1; j < rings.length; j++) {
-      const A = rings[i], B = rings[j];
-      rimPair(A.a, B.a); rimPair(A.a, B.b); rimPair(A.b, B.a); rimPair(A.b, B.b);
+    for (const R of rings) {
+      const lim = zLim(R), z = clamp(R.z, -lim, lim);
+      if (z !== R.z) R.z = R.pz = z;
+      collidePegs(R);
+      collideStatic(R.a, R); collideStatic(R.b, R);
     }
+    for (let i = 0; i < rings.length; i++) for (let j = i + 1; j < rings.length; j++) ringPair(rings[i], rings[j]);
   }
-  for (const R of rings) for (let n = 0; n < 2; n++) {
-    const p = n ? R.b : R.a;
-    if (p.c) { p.px = p.x - (p.x - p.px) * 0.985; p.py = p.y - (p.y - p.py) * 0.985; p.c = 0; }
+  for (const R of rings) {
+    R.ground = false;
+    for (let n = 0; n < 2; n++) {
+      const p = n ? R.b : R.a;
+      if (p.c) { p.px = p.x - (p.x - p.px) * 0.985; p.py = p.y - (p.y - p.py) * 0.985; p.c = 0; R.ground = true; }
+    }
   }
   for (const R of rings) updateThread(R);
 }
@@ -375,13 +578,28 @@ function updateSpin(R, dt) {
   const rel = Math.hypot(vx / (STEP / SUB) - sample(u, cx, cy), vy / (STEP / SUB) - sample(v, cx, cy));
   const target = clamp(-sample(curl, cx, cy) * SPIN_K, -SPIN_MAX, SPIN_MAX);
   R.om += (target - R.om) * (1 - Math.exp(-3 * dt)) + (Math.random() - 0.5) * rel * 0.02;
-  if (R.on >= 0 || speed < 25) {
-    const d = ((SPIN_REST - R.phi) % Math.PI + Math.PI * 1.5) % Math.PI - Math.PI / 2;
-    R.om += d * 40 * dt;
+  // Тонущее кольцо и само разворачивается плашмя, но вихрь его легко перебарывает; легшее на дно — ложится плашмя сразу.
+  // Надетое висит как повисло (трение о стержень гасит вращение) и ложится плашмя, только опустившись на подставку
+  const rest = ((SPIN_REST - R.phi) % Math.PI + Math.PI * 1.5) % Math.PI - Math.PI / 2;
+  if (R.on >= 0 && Math.max(R.a.y, R.b.y) < pegs[R.on].bottom - RIM - 4) R.om *= Math.exp(-6 * dt);
+  else if (R.on >= 0 || (speed < 25 && R.ground)) {
+    R.om += rest * 40 * dt;
     R.om *= Math.exp(-6 * dt);
-  }
+  } else R.om += rest * PHI_ALIGN * dt;
   R.om = clamp(R.om, -SPIN_MAX, SPIN_MAX);
   R.phi += R.om * dt;
+  // Штырь в дырке не даёт кольцу встать к зрителю: наклон ограничен, пока обод не упрётся в стержень
+  if (engaged(R)) {
+    const maxTilt = Math.acos(Math.min(1, (Math.abs(R.z) + RIM + PEG_R) / (R.D / 2)));
+    const d = (R.phi % Math.PI + Math.PI * 1.5) % Math.PI - Math.PI / 2;
+    if (Math.abs(d) > maxTilt) {
+      R.phi -= d - Math.sign(d) * maxTilt;
+      if (R.om * d > 0) R.om = 0;
+    }
+  }
+  // Завихрения понемногу гоняют кольцо вперёд-назад по глубине
+  const j = (Math.random() - 0.5) * rel * Z_JITTER * dt;
+  R.z += j; R.pz += j;
 }
 
 function checkThreads(dt) {
@@ -425,15 +643,17 @@ function updateFx(dt) {
   const e = 1 - Math.exp(-5 * dt);
   for (let i = bubbles.length - 1; i >= 0; i--) {
     const b = bubbles[i];
-    b.vx += (sample(u, b.x, b.y) - b.vx) * e;
-    b.vy += (sample(v, b.x, b.y) - 50 - b.r * 10 - b.vy) * e;
+    // Пузырь всплывает против силы тяжести и лопается у той стенки, что сейчас сверху
+    const up = 50 + b.r * 10;
+    b.vx += (sample(u, b.x, b.y) - up * grav.x - b.vx) * e;
+    b.vy += (sample(v, b.x, b.y) - up * grav.y - b.vy) * e;
     b.x = clamp(b.x + b.vx * dt, b.r, W - b.r);
     b.y += b.vy * dt;
-    if (b.y < b.r + 1) bubbles.splice(i, 1);
+    if (b.y < b.r + 1 || b.y > H - b.r - 1 || (b.x <= b.r && grav.x > 0.3) || (b.x >= W - b.r && grav.x < -0.3)) bubbles.splice(i, 1);
   }
   for (const s of specks) {
-    s.x += sample(u, s.x, s.y) * dt;
-    s.y += (sample(v, s.x, s.y) + 4) * dt;
+    s.x += (sample(u, s.x, s.y) + 4 * grav.x) * dt;
+    s.y += (sample(v, s.x, s.y) + 4 * grav.y) * dt;
     if (s.x < 2 || s.x > W - 2 || s.y < 2 || s.y > H - 2) { s.x = 4 + Math.random() * (W - 8); s.y = 4 + Math.random() * (H - 8); }
   }
   for (let i = sparks.length - 1; i >= 0; i--) {
@@ -486,7 +706,8 @@ function toast(t) { toastText = t; toastT = 1.8; }
 function resetPumps() { for (const p of pumps) Object.assign(p, makePump()); }
 
 function startGame(m) {
-  mode = m; initAudio(); resetFluid(); resetPumps();
+  mode = m; initAudio(); resetFluid(); resetPumps(); resetMotion();
+  if (motion.on) enableMotion();
   rings = []; bubbles.length = 0; sparks.length = 0;
   game = { t: 0, left: 0, score: 0, wave: 1, hold: 0 };
   if (m === 'classic') { spawnRings(8, RING_D, false); toast('Надень все кольца'); }
@@ -571,6 +792,7 @@ function demo(dt) {
 
 function tick(dt) {
   if (state === 'menu') demo(dt);
+  updateMotion(dt);
   updatePump(pumps[0], dt); updatePump(pumps[1], dt);
   inject(0); inject(1);
   fluidStep(dt);
@@ -644,12 +866,18 @@ document.addEventListener('gesturestart', e => e.preventDefault());
 const KEYS = { KeyA: 0, ArrowLeft: 0, KeyL: 1, ArrowRight: 1 };
 window.addEventListener('keydown', e => {
   if (e.code === 'Escape' || e.code === 'KeyP') { if (state === 'play') pauseGame(); else if (state === 'pause') resumeGame(); return; }
+  // Без телефона: Q / E — наклон, пробел — стукнуть по аквариуму снизу
+  if (e.code === 'KeyQ' || e.code === 'KeyE') { motion.keyTilt = e.code === 'KeyQ' ? -1 : 1; return; }
+  if (e.code === 'Space') { e.preventDefault(); shake.x = (Math.random() - 0.5) * 1600; shake.y = -4000; return; }
   const s = KEYS[e.code];
   if (s === undefined || e.repeat || state !== 'play') return;
   initAudio();
   press(s, null, 'key', e.shiftKey);
 });
-window.addEventListener('keyup', e => { const s = KEYS[e.code]; if (s !== undefined && pumps[s].id === 'key') release(s); });
+window.addEventListener('keyup', e => {
+  if ((e.code === 'KeyQ' && motion.keyTilt < 0) || (e.code === 'KeyE' && motion.keyTilt > 0)) motion.keyTilt = 0;
+  const s = KEYS[e.code]; if (s !== undefined && pumps[s].id === 'key') release(s);
+});
 
 // ---------- Меню ----------
 const overlays = { menu: document.getElementById('menu'), pause: document.getElementById('pause'), result: document.getElementById('result') };
@@ -669,6 +897,18 @@ document.getElementById('resumeBtn').addEventListener('click', resumeGame);
 document.getElementById('restartBtn').addEventListener('click', () => startGame(mode));
 document.getElementById('againBtn').addEventListener('click', () => startGame(mode));
 pauseBtn.addEventListener('click', pauseGame);
+
+const tiltBtn = document.getElementById('tiltBtn');
+try { motion.on = localStorage.getItem('rings_tilt') !== '0'; } catch (e) { }
+function refreshTilt() { tiltBtn.textContent = `Наклон и тряска: ${motion.on ? 'вкл' : 'выкл'}`; }
+if (window.DeviceMotionEvent && navigator.maxTouchPoints > 0) tiltBtn.classList.remove('hidden');
+tiltBtn.addEventListener('click', () => {
+  motion.on = !motion.on;
+  try { localStorage.setItem('rings_tilt', motion.on ? '1' : '0'); } catch (e) { }
+  if (motion.on) enableMotion(); else resetMotion();
+  refreshTilt();
+});
+refreshTilt();
 document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); });
 
 // ---------- Отрисовка ----------
@@ -734,12 +974,15 @@ function render(now) {
     ctx.fillStyle = 'rgba(20,50,100,0.35)'; rr(g.x - 5, g.bottom, 10, fy - g.bottom + 4, 3); ctx.fill();
   }
 
+  // Рисуем по глубине: дальние половины колец, штыри посередине (z = 0), ближние половины
   ctx.lineCap = 'butt';
-  const onPeg = R => R.on >= 0 || R.eng[0] || R.eng[1];
-  for (const R of rings) if (onPeg(R)) drawRing(R, false);
-
-  for (let k = 0; k < pegs.length; k++) {
-    const g = pegs[k];
+  const layers = [];
+  for (let k = 0; k < pegs.length; k++) layers.push({ z: 0, k });
+  for (const R of rings) layers.push({ z: R.z - R.hz / 2, R, front: false }, { z: R.z + R.hz / 2, R, front: true });
+  layers.sort((p, q) => p.z - q.z);
+  for (const it of layers) {
+    if (it.R) { drawRing(it.R, it.front); continue; }
+    const k = it.k, g = pegs[k];
     const pg = ctx.createLinearGradient(g.x - PEG_R, 0, g.x + PEG_R, 0);
     pg.addColorStop(0, '#8d9bb0'); pg.addColorStop(0.4, '#ffffff'); pg.addColorStop(1, '#7a879b');
     ctx.fillStyle = pg; rr(g.x - PEG_R, g.tip - PEG_R, PEG_R * 2, g.bottom - g.tip + PEG_R, PEG_R); ctx.fill();
@@ -748,11 +991,6 @@ function render(now) {
     if (mode === 'colors' && state !== 'menu') {
       ctx.beginPath(); ctx.arc(g.x, g.tip, PEG_R + 2.5, 0, Math.PI * 2); ctx.fillStyle = DUO[k]; ctx.fill();
     }
-  }
-
-  for (const R of rings) {
-    if (!onPeg(R)) drawRing(R, false);
-    drawRing(R, true);
   }
 
   for (const n of nozzles) {
