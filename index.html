@@ -29,6 +29,17 @@
   button.ghost{background:rgba(255,255,255,.14);box-shadow:none}
   #pauseBtn{position:fixed;top:4px;left:50%;min-width:0;width:44px;height:44px;padding:0;font-size:16px;
     border-radius:12px;background:rgba(0,0,0,.22);box-shadow:none}
+  .modes,.opts{display:flex;flex-direction:column;align-items:center;gap:10px}
+  .mode{display:flex;flex-direction:column;align-items:center;gap:4px}
+  /* Низкий кадр (альбомный телефон): режимы и настройки в ряд, без длинного абзаца — меню влезает без прокрутки */
+  #root.short .overlay{gap:8px;padding:12px 16px}
+  #root.short h1{font-size:30px}
+  #root.short .intro,#root.short .keys{display:none}
+  #root.short .sub{margin-bottom:2px}
+  #root.short .modes,#root.short .opts{flex-direction:row;flex-wrap:wrap;justify-content:center}
+  #root.short .modes button{min-width:150px;padding:12px 16px}
+  #root.short .opts button,#root.short .overlay>button{min-width:0;font-size:16px;padding:10px 18px}
+  #root.short .overlay>button{min-width:220px}
 </style>
 </head>
 <body>
@@ -39,15 +50,18 @@
 <div id="menu" class="overlay">
   <h1>Кольца</h1>
   <p class="sub">Водная игра из детства</p>
-  <p>Жми внизу экрана слева или справа. Чем выше касание — тем сильнее струя. Резкий свайп вверх — сильный толчок. Насос выдыхается: отпусти, чтобы он снова набрал воду.</p>
-  <div style="height:6px"></div>
-  <button data-mode="classic">Классика</button><div class="small" id="best-classic"></div>
-  <button data-mode="colors" class="alt">Два цвета</button><div class="small" id="best-colors"></div>
-  <button data-mode="waves" class="green">Волны</button><div class="small" id="best-waves"></div>
-  <button id="tiltBtn" class="ghost hidden"></button>
-  <button class="ghost orientBtn"></button>
-  <button id="howBtn" class="ghost">Как играть</button>
-  <p class="small">На компьютере: A / L или стрелки, с Shift — сильнее; Q / E — наклон, пробел — встряска</p>
+  <p class="intro">Жми внизу экрана слева или справа. Чем выше касание — тем сильнее струя. Резкий свайп вверх — сильный толчок. Насос выдыхается: отпусти, чтобы он снова набрал воду.</p>
+  <div class="modes">
+    <div class="mode"><button data-mode="classic">Классика</button><div class="small" id="best-classic"></div></div>
+    <div class="mode"><button data-mode="colors" class="alt">Два цвета</button><div class="small" id="best-colors"></div></div>
+    <div class="mode"><button data-mode="waves" class="green">Волны</button><div class="small" id="best-waves"></div></div>
+  </div>
+  <div class="opts">
+    <button id="tiltBtn" class="ghost hidden"></button>
+    <button class="ghost orientBtn"></button>
+    <button id="howBtn" class="ghost">Как играть</button>
+  </div>
+  <p class="small keys">На компьютере: A / L или стрелки, с Shift — сильнее; Q / E — наклон, пробел — встряска</p>
 </div>
 
 <div id="pause" class="overlay hidden">
@@ -1028,6 +1042,7 @@ function layout() {
   const side = rot === 90 || rot === 270;
   sw = side ? vh : vw; sh = side ? vw : vh;
   root.style.width = sw + 'px'; root.style.height = sh + 'px';
+  root.classList.toggle('short', sh < 520);
   root.style.transform = rot === 90 ? `translate(${vw}px,0) rotate(90deg)` : rot === 180 ? `translate(${vw}px,${vh}px) rotate(180deg)`
     : rot === 270 ? `translate(0,${vh}px) rotate(270deg)` : '';
   canvas.width = Math.round(sw * dpr); canvas.height = Math.round(sh * dpr);
@@ -1125,6 +1140,20 @@ document.getElementById('restartBtn').addEventListener('click', () => startGame(
 document.getElementById('againBtn').addEventListener('click', () => startGame(mode));
 pauseBtn.addEventListener('click', pauseGame);
 document.getElementById('howBtn').addEventListener('click', () => { tut.force = true; startGame('classic'); });
+
+// Кадр повёрнут относительно экрана (телефон с выключенным автоповоротом) — браузер прокручивал бы меню
+// поперёк пальца. Тогда прокручиваем сами, переводя сдвиг пальца в координаты кадра
+for (const o of Object.values(overlays)) {
+  let lastY = null;
+  o.addEventListener('touchstart', e => { lastY = rot ? toRoot(e.touches[0])[1] : null; }, { passive: true });
+  o.addEventListener('touchmove', e => {
+    if (lastY === null) return;
+    const y = toRoot(e.touches[0])[1];
+    o.scrollTop -= y - lastY; lastY = y;
+    e.preventDefault();
+  }, { passive: false });
+  o.addEventListener('touchend', () => { lastY = null; });
+}
 
 const tiltBtn = document.getElementById('tiltBtn');
 try { motion.on = localStorage.getItem('rings_tilt') !== '0'; } catch (e) { }
