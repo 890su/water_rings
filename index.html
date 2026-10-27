@@ -68,13 +68,16 @@ const W = 360, H = 648, CELL = 12, NX = W / CELL, NY = H / CELL, SX = NX + 2, NC
 const RIM = 5, RING_D = 34, PEG_R = 3.5, G = 220, K_PAR = 1.6, K_PERP = 5.5, MAXV = 800;
 // Насос набирает воду заметно быстрее, чем выдаёт её, — как у настоящей игрушки
 const JET = 620, JET_LEN = 340, JET_W0 = 34, JET_SPREAD = 0.24, DRAIN = 1.1, REFILL = 4, VORT = 5, FLUID_DAMP = 0.6;
-// Надетое кольцо трётся о штырь и частично прикрыто им от потока — чтобы его не сдувало каждым нажатием
-const PEG_SHELTER = 0.7, PEG_FRICTION = 3, PEG_BIND = 3, PEG_DRAG = 6, PEG_TWIST = 0.05;
+// Надетое кольцо трётся о штырь (сильнее, если висит с наклоном) — одиночное нажатие его не сбивает,
+// а серия сильных струй может поднять над верхушкой и скинуть. PEG_SHELTER — доля потока, что до него доходит
+const PEG_SHELTER = 1, PEG_FRICTION = 2, PEG_BIND = 1, PEG_DRAG = 2, PEG_TWIST = 0.3;
 // Видимое кувыркание кольца вокруг своей оси: phi — угол наклона к зрителю
 // Тонущее плоское кольцо стремится лечь горизонтально (главный рычаг сложности)
 const ALIGN = 20;
 // То же для наклона к зрителю: без него кувыркающееся кольцо почти не попадает на штырь
 const PHI_ALIGN = 6;
+// Доля выравнивания для надетого кольца: висит с наклоном, но струя ещё может его выпрямить и поднять
+const PEG_ALIGN = 0.3;
 const SPIN_REST = 0.35, SPIN_K = 0.06, SPIN_MAX = 14, SUCTION = 220;
 // Аквариум узкий: глубина чуть больше диаметра кольца. z — глубина, плюс к зрителю.
 // Кольцо, лежащее плашмя, занимает её почти целиком и не пропускает другие кольца мимо себя;
@@ -92,7 +95,7 @@ const floorY = x => {
   return H;
 };
 // Раскладка штырей — заготовка под уровни: штыри симметричны, PEG_X — расстояние от левой стенки
-const PEG_X = 110;
+const PEG_X = 115;
 const pegs = [{ x: PEG_X, tip: PEG_TIP, bottom: PEG_BOTTOM }, { x: W - PEG_X, tip: PEG_TIP, bottom: PEG_BOTTOM }];
 const nozzles = [mkNozzle(66, H - 6, 0.3), mkNozzle(W - 66, H - 6, -0.3)];
 const PALETTE = ['#ff4d6d', '#ffd23f', '#3ddc97', '#4cc9f0', '#b388ff', '#ff9f1c', '#f15bb5', '#9ef01a'];
@@ -400,8 +403,9 @@ function integrateRing(R, dt) {
     const dp = (R.phi % Math.PI + Math.PI * 1.5) % Math.PI - Math.PI / 2;
     rub = Math.exp(-PEG_FRICTION * (1 + PEG_BIND * Math.hypot((R.a.y - R.b.y) / R.D, Math.sin(dp))) * dt);
   }
-  // Свободное кольцо выравнивается поперёк силы тяжести — при наклоне телефона ложится по новому «низу»
-  const level = onPeg ? 0 : ((R.a.x - R.b.x) * grav.x + (R.a.y - R.b.y) * grav.y) * ALIGN * dt;
+  // Кольцо выравнивается поперёк силы тяжести — при наклоне телефона ложится по новому «низу».
+  // Надетое — лишь слегка: иначе висит ребром к струе, и вода не может поднять его со штыря
+  const level = (onPeg ? PEG_ALIGN : 1) * ((R.a.x - R.b.x) * grav.x + (R.a.y - R.b.y) * grav.y) * ALIGN * dt;
   for (let n = 0; n < 2; n++) {
     const p = n ? R.b : R.a, lv = n ? level : -level;
     let vx = (p.x - p.px) / dt + lv * grav.x, vy = (p.y - p.py) / dt;
@@ -499,8 +503,22 @@ function pushRing(R, s, dx, dy) {
 
 // Кольцо — отрезок толщиной в обод. Разминуться можно в плоскости или по глубине;
 // выбираем путь короче, если стёкла (или штырь в дырке) оставляют для него место.
+// Развернуть кольцо к зрителю так, чтобы по глубине оно занимало не больше hz
+function narrowRing(R, hz) {
+  const need = Math.acos(clamp((hz - RIM) / (R.D / 2), 0, 1));
+  const dp = (R.phi % Math.PI + Math.PI * 1.5) % Math.PI - Math.PI / 2, sg = dp < 0 ? -1 : 1;
+  if (Math.abs(dp) >= need) return;
+  R.phi += sg * (need - Math.abs(dp));
+  if (R.om * sg < 0) R.om = 0;
+  updateDepth(R);
+}
+
+// Сдвиг по глубине без отскока — иначе кольцо продолжает уплывать от толчка
+function shiftZ(R, dz) { R.z += dz; R.pz += dz; }
+
 function ringPair(A, B) {
-  const dz = B.z - A.z, sg = dz < 0 ? -1 : 1, penZ = A.hz + B.hz - Math.abs(dz);
+  const dz = B.z - A.z, sg = dz < 0 ? -1 : 1;
+  let penZ = A.hz + B.hz - Math.abs(dz);
   if (penZ <= 0) return;
   segParams(A.a.x, A.a.y, A.b.x, A.b.y, B.a.x, B.a.y, B.b.x, B.b.y);
   const s = SEG.s, t = SEG.t;
@@ -508,10 +526,16 @@ function ringPair(A, B) {
   let nx = B.a.x + (B.b.x - B.a.x) * t - px, ny = B.a.y + (B.b.y - B.a.y) * t - py;
   const d = Math.hypot(nx, ny), md = 2 * RIM;
   if (d >= md) return;
+  // Глубоко вошли друг в друга — значит, одно проплывало перед другим и начало ложиться плашмя.
+  // Лечь ему не даём, пока не разминутся, вместо того чтобы отшвыривать вбок
+  if (d < RIM) {
+    const F = !engaged(A) && (engaged(B) || A.hz <= B.hz) ? A : !engaged(B) ? B : null;
+    if (F) { narrowRing(F, Math.max(RIM, F.hz - penZ)); penZ = A.hz + B.hz - Math.abs(dz); if (penZ <= 0) return; }
+  }
   const roomA = Math.max(0, zLim(A) + sg * A.z), roomB = Math.max(0, zLim(B) - sg * B.z);
-  if (penZ < md - d && penZ <= roomA + roomB) {
+  if ((penZ < md - d || d < RIM) && penZ <= roomA + roomB) {
     const mA = Math.min(roomA, Math.max(penZ / 2, penZ - roomB));
-    A.z -= sg * mA; B.z += sg * (penZ - mA);
+    shiftZ(A, -sg * mA); shiftZ(B, sg * (penZ - mA));
     return;
   }
   if (d < 1e-6) {
@@ -536,13 +560,21 @@ function collidePegs(R) {
     const d = Math.hypot(nx, ny), md = RIM + PEG_R;
     if (d >= md) continue;
     const side = R.z < 0 ? -1 : 1;
-    if (penZ < md - d && penZ <= R.zWall - Math.abs(R.z)) { R.z += side * penZ; continue; }
-    if (d < 1e-6) { nx = (R.a.x + R.b.x) / 2 < g.x ? -1 : 1; ny = 0; } else { nx /= d; ny /= d; }
+    if (penZ < md - d && penZ <= R.zWall - Math.abs(R.z)) { shiftZ(R, side * penZ); continue; }
+    // Глубоко зашло — проплывало перед штырём или за ним и начало ложиться. Держим его развёрнутым
+    // и отодвинутым по глубине, пока не минует стержень, а не отшвыриваем вбок
+    if (d < RIM) {
+      const zt = clamp(Math.abs(R.z), PEG_R + RIM + 0.5, TANK_Z - RIM);
+      narrowRing(R, Math.min(zt - PEG_R, TANK_Z - zt));
+      shiftZ(R, side * zt - R.z);
+      continue;
+    }
+    nx /= d; ny /= d;
     pushRing(R, s, nx * (md - d), ny * (md - d));
     // Упёршись в стержень краем, кольцо проворачивается к зрителю и соскальзывает за штырь или перед ним
     const dp = (R.phi % Math.PI + Math.PI * 1.5) % Math.PI - Math.PI / 2, tw = (dp < 0 ? -1 : 1) * (md - d) * PEG_TWIST;
-    R.phi += tw; R.om += tw * 30;
-    R.z += side * (md - d) * 0.5;
+    R.phi += tw; R.om += tw * 10;
+    shiftZ(R, side * (md - d) * 0.5);
   }
 }
 
