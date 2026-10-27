@@ -45,7 +45,7 @@
   <button data-mode="colors" class="alt">Два цвета</button><div class="small" id="best-colors"></div>
   <button data-mode="waves" class="green">Волны</button><div class="small" id="best-waves"></div>
   <button id="tiltBtn" class="ghost hidden"></button>
-  <button class="ghost orientBtn"></button>
+  <button id="howBtn" class="ghost">Как играть</button>
   <p class="small">На компьютере: A / L или стрелки, с Shift — сильнее; Q / E — наклон, пробел — встряска</p>
 </div>
 
@@ -53,7 +53,6 @@
   <h1>Пауза</h1>
   <button id="resumeBtn">Продолжить</button>
   <button id="restartBtn" class="ghost">Заново</button>
-  <button class="ghost orientBtn"></button>
   <button class="ghost toMenu">В меню</button>
 </div>
 
@@ -96,7 +95,7 @@ const SPIN_REST = 0.35, SPIN_K = 0.06, SPIN_MAX = 14, SUCTION = 264;
 const TANK_Z = 25, Z_DAMP = 2.5, Z_JITTER = 0.5;
 const STEP = 1 / 60, SUB = 2;
 
-// Два поля — альбомное (основное) и портретное. Раскладка зеркальна: сопло в nozzleX от стенки,
+// Два поля — портретное (игра) и альбомное (заготовка под уровни). Раскладка зеркальна: сопло в nozzleX от стенки,
 // штырь в pegX, верхушка tip и полка bottom по y, струя бьёт на jetLen. Дно-горка — кольца скатываются к соплам.
 // Отдельные константы — чтобы tools/ могли их переопределять при подборе баланса
 const L_W = 648, L_H = 360, L_NOZZLE_X = 150, L_PEG_X = 230, L_TIP = 150, L_BOTTOM = 258, L_JET_LEN = 240;
@@ -124,7 +123,8 @@ function setField(name) {
   nozzles = [mkNozzle(f.nozzleX, H - 6, 0.3), mkNozzle(W - f.nozzleX, H - 6, -0.3)];
   [u, v, u0, v0, pr, dv, curl] = Array.from({ length: 7 }, () => new Float64Array(NCELLS));
 }
-const START_FIELD = 'landscape';
+// Игра портретная, как и сама игрушка; альбомное поле оставлено в FIELDS как заготовка под уровни
+const START_FIELD = 'portrait';
 setField(START_FIELD);
 
 const floorY = x => {
@@ -868,7 +868,24 @@ function startGame(m) {
   else if (m === 'colors') { game.left = 90; spawnRings(8, RING_D - 2, true); toast('Красные — влево, синие — вправо'); }
   else { game.left = 60; spawnWave(); toast('Волна 1'); }
   state = 'play';
+  if (!tutSeen() || tut.force) tutStart();
   show(null);
+}
+
+// ---------- Подсказка для первой игры ----------
+// Поверх игры, ничего не блокирует: две блеклые полоски — зоны насосов (снизу слабо, сверху сильно),
+// и палец показывает: нажми слева, веди вверх — струя сильнее; потом справа. Гаснет сама,
+// когда игрок нажал по паре раз каждым насосом, и больше не показывается
+// done — на случай, если хранилище недоступно (приватный режим): тогда хотя бы до перезагрузки не повторяем
+const tut = { on: false, a: 0, t: 0, presses: [0, 0], force: false, done: false };
+function tutSeen() { try { return tut.done || localStorage.getItem('rings_tut') === '1'; } catch (e) { return tut.done; } }
+function tutStart() { Object.assign(tut, { on: true, a: 0, t: 0, presses: [0, 0], force: false }); }
+function tutUpdate(dt) {
+  if (!tut.on) return;
+  tut.t += dt;
+  const done = tut.presses[0] >= 2 && tut.presses[1] >= 2;
+  tut.a = clamp(tut.a + (done ? -dt / 0.6 : dt / 0.5), 0, 1);
+  if (done && tut.a <= 0) { tut.on = false; tut.done = true; try { localStorage.setItem('rings_tut', '1'); } catch (e) { } }
 }
 
 function spawnWave() {
@@ -958,7 +975,7 @@ function tick(dt) {
   for (let i = 0; i < SUB; i++) physics(dt / SUB);
   checkThreads(dt);
   updateFx(dt);
-  if (state === 'play') gameLogic(dt);
+  if (state === 'play') { gameLogic(dt); tutUpdate(dt); }
   if (toastT > 0) toastT -= dt;
   audioUpdate();
 }
@@ -975,7 +992,8 @@ const PAD = 8, GAUGE_W = 16;
 // На компьютере (без касаний) не поворачиваем ничего
 const root = document.getElementById('root');
 let gameAngle = 0, rot = 0;
-const touchDevice = () => navigator.maxTouchPoints > 0;
+// Телефон или планшет — основной ввод пальцем. Сенсорный ноутбук или встроенный браузер с касаниями сюда не попадают
+const touchDevice = () => !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
 function screenAngle() {
   const o = window.screen && window.screen.orientation;
   return (((o ? o.angle : window.orientation) || 0) % 360 + 360) % 360;
@@ -1024,7 +1042,6 @@ function layout() {
   const land = sw > sh;
   if (wasLand !== null && land !== wasLand) motion.m0 = motion.z0 = null;
   wasLand = land;
-  refreshOrient();
 }
 
 // Левая/правая половина экрана; чем выше касание, тем сильнее струя.
@@ -1040,7 +1057,7 @@ function press(side, y, id, strong) {
   p.y = p.lastY = y == null ? 0 : y; p.lastT = performance.now();
   p.base = y == null ? (strong ? 1 : 0.65) : strengthFromY(y);
   if (navigator.vibrate) try { navigator.vibrate(6 + Math.round(p.base * 24)); } catch (e) { }
-  if (state === 'play') game.presses++;
+  if (state === 'play') { game.presses++; if (tut.on) tut.presses[side]++; }
 }
 function release(side) { pumps[side].held = false; pumps[side].id = null; }
 
@@ -1104,11 +1121,12 @@ document.getElementById('resumeBtn').addEventListener('click', resumeGame);
 document.getElementById('restartBtn').addEventListener('click', () => startGame(mode));
 document.getElementById('againBtn').addEventListener('click', () => startGame(mode));
 pauseBtn.addEventListener('click', pauseGame);
+document.getElementById('howBtn').addEventListener('click', () => { tut.force = true; startGame('classic'); });
 
 const tiltBtn = document.getElementById('tiltBtn');
 try { motion.on = localStorage.getItem('rings_tilt') !== '0'; } catch (e) { }
 function refreshTilt() { tiltBtn.textContent = `Наклон и тряска: ${motion.on ? 'вкл' : 'выкл'}`; }
-if (window.DeviceMotionEvent && navigator.maxTouchPoints > 0) tiltBtn.classList.remove('hidden');
+if (window.DeviceMotionEvent && touchDevice()) tiltBtn.classList.remove('hidden');
 tiltBtn.addEventListener('click', () => {
   motion.on = !motion.on;
   try { localStorage.setItem('rings_tilt', motion.on ? '1' : '0'); } catch (e) { }
@@ -1118,26 +1136,6 @@ tiltBtn.addEventListener('click', () => {
 refreshTilt();
 document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); });
 
-// Поле альбомное или портретное. Кнопка меняет само поле (аквариум, штыри, сопла) и игровой кадр под него
-function refreshOrient() {
-  document.querySelectorAll('.orientBtn').forEach(b => {
-    b.textContent = field === 'landscape' ? 'Сделать поле вертикальным' : 'Сделать поле горизонтальным';
-  });
-}
-
-function changeField(name) {
-  if (name === field) return;
-  setField(name);
-  for (const s of specks) { s.x = Math.random() * W; s.y = Math.random() * H; }
-  bubbles.length = 0; sparks.length = 0;
-  resetPumps(); resetMotion();
-  pickGameAngle(); layout();
-  try { localStorage.setItem('rings_field', name); } catch (e) { }
-  if (state === 'menu') { rings = []; spawnRings(8, RING_D, false); } else startGame(mode);
-}
-document.querySelectorAll('.orientBtn').forEach(b => b.addEventListener('click', () => {
-  changeField(field === 'landscape' ? 'portrait' : 'landscape');
-}));
 ['orientationchange', 'resize'].forEach(ev => window.addEventListener(ev, layout));
 if (window.screen && screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener('change', layout);
 
@@ -1246,6 +1244,7 @@ function render(now) {
   ctx.lineWidth = 6; ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.stroke();
 
   if (state === 'play' || state === 'pause') drawHud();
+  if (tut.on && state === 'play') drawTutorial();
 
   if (toastT > 0 && state === 'play') {
     ctx.globalAlpha = Math.min(1, toastT / 0.4);
@@ -1301,6 +1300,44 @@ function drawHud() {
   ctx.textBaseline = 'alphabetic';
 }
 
+// Зона насоса для подсказки: полоска посреди своей половины, снизу (слабо) вверх (сильно)
+function tutStripe(side) {
+  const x = sw * (side ? 0.75 : 0.25);
+  return sh > sw ? { x, y0: sh * 0.93, y1: sh * 0.56 } : { x, y0: sh * 0.9, y1: sh * 0.2 };
+}
+
+function drawTutorial() {
+  const A = tut.a;
+  if (A <= 0) return;
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,30,70,0.5)'; ctx.shadowBlur = 6;
+  for (let s = 0; s < 2; s++) {
+    const { x, y0, y1 } = tutStripe(s), w = 26;
+    const gr = ctx.createLinearGradient(0, y0, 0, y1);
+    gr.addColorStop(0, 'rgba(255,255,255,0.04)'); gr.addColorStop(1, 'rgba(255,255,255,0.26)');
+    // Насосом уже понажимали — его полоска бледнеет
+    ctx.globalAlpha = A * (tut.presses[s] >= 2 ? 0.35 : 1);
+    ctx.fillStyle = gr; rr(x - w / 2, y1, w, y0 - y1, w / 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.65)'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x - 7, y1 + 15); ctx.lineTo(x, y1 + 8); ctx.lineTo(x + 7, y1 + 15); ctx.stroke();
+  }
+  ctx.globalAlpha = A * 0.95; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = '600 14px system-ui';
+  ctx.fillText('Жми здесь · выше — сильнее', sw / 2, tutStripe(0).y1 - 18);
+  // Палец: 2,4 с на сторону — появился внизу полоски, нажал, повёл вверх (круг растёт — струя сильнее), отпустил
+  const cyc = 2.4, side = Math.floor(tut.t / cyc) % 2, p = (tut.t % cyc) / cyc;
+  const { x, y0, y1 } = tutStripe(side);
+  const k = clamp((p - 0.22) / 0.5, 0, 1), e = k * k * (3 - 2 * k), y = y0 + (y1 - y0) * e;
+  const vis = p < 0.1 ? p / 0.1 : p > 0.8 ? Math.max(0, (0.94 - p) / 0.14) : 1;
+  if (p > 0.16 && p < 0.8) {
+    ctx.globalAlpha = A * vis * 0.35; ctx.fillStyle = '#c8f4ff';
+    ctx.beginPath(); ctx.arc(x, y, 9 + 20 * e, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = A * vis; ctx.font = '42px system-ui'; ctx.textBaseline = 'top';
+  ctx.fillText('👆', x + 5, y - 3);
+  ctx.restore();
+}
+
 // ---------- Цикл ----------
 let last = performance.now(), acc = 0;
 function frame(now) {
@@ -1318,8 +1355,6 @@ pickGameAngle();
 layout();
 spawnRings(8, RING_D, false);
 show('menu');
-// По умолчанию поле альбомное; выбор игрока запоминаем
-try { if (localStorage.getItem('rings_field') === 'portrait') changeField('portrait'); } catch (e) { }
 requestAnimationFrame(frame);
 </script>
 </body>
