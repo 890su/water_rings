@@ -12,6 +12,7 @@
     font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#fff}
   canvas{display:block;touch-action:none}
   .overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    justify-content:safe center;overflow-y:auto;touch-action:pan-y;
     gap:10px;background:rgba(10,20,40,.62);text-align:center;padding:24px;box-sizing:border-box}
   .hidden{display:none!important}
   h1{margin:0;font-size:40px;letter-spacing:1px;text-shadow:0 3px 0 rgba(0,0,0,.25)}
@@ -24,7 +25,7 @@
   button.alt{background:linear-gradient(#ff6b8a,#d8264d);box-shadow:0 5px 0 #8a0d27}
   button.green{background:linear-gradient(#3fd68f,#16a35f);box-shadow:0 5px 0 #0b6b3c}
   button.ghost{background:rgba(255,255,255,.14);box-shadow:none}
-  #pauseBtn{position:fixed;top:8px;right:8px;min-width:0;width:44px;height:44px;padding:0;font-size:16px;
+  #pauseBtn{position:fixed;top:4px;left:50%;min-width:0;width:44px;height:44px;padding:0;font-size:16px;
     border-radius:12px;background:rgba(0,0,0,.22);box-shadow:none}
 </style>
 </head>
@@ -35,12 +36,13 @@
 <div id="menu" class="overlay">
   <h1>Кольца</h1>
   <p class="sub">Водная игра из детства</p>
-  <p>Жми на левую или правую половину экрана. Чем выше касание — тем сильнее струя. Резкий свайп вверх — сильный толчок. Насос выдыхается: отпусти, чтобы он снова набрал воду.</p>
+  <p>Жми внизу экрана слева или справа. Чем выше касание — тем сильнее струя. Резкий свайп вверх — сильный толчок. Насос выдыхается: отпусти, чтобы он снова набрал воду.</p>
   <div style="height:6px"></div>
   <button data-mode="classic">Классика</button><div class="small" id="best-classic"></div>
   <button data-mode="colors" class="alt">Два цвета</button><div class="small" id="best-colors"></div>
   <button data-mode="waves" class="green">Волны</button><div class="small" id="best-waves"></div>
   <button id="tiltBtn" class="ghost hidden"></button>
+  <button class="ghost orientBtn"></button><div class="small orientHint"></div>
   <p class="small">На компьютере: A / L или стрелки, с Shift — сильнее; Q / E — наклон, пробел — встряска</p>
 </div>
 
@@ -48,6 +50,7 @@
   <h1>Пауза</h1>
   <button id="resumeBtn">Продолжить</button>
   <button id="restartBtn" class="ghost">Заново</button>
+  <button class="ghost orientBtn"></button><div class="small orientHint"></div>
   <button class="ghost toMenu">В меню</button>
 </div>
 
@@ -741,7 +744,7 @@ function startGame(m) {
   mode = m; initAudio(); resetFluid(); resetPumps(); resetMotion();
   if (motion.on) enableMotion();
   rings = []; bubbles.length = 0; sparks.length = 0;
-  game = { t: 0, left: 0, score: 0, wave: 1, hold: 0 };
+  game = { t: 0, left: 0, score: 0, wave: 1, hold: 0, presses: 0 };
   if (m === 'classic') { spawnRings(8, RING_D, false); toast('Надень все кольца'); }
   else if (m === 'colors') { game.left = 90; spawnRings(8, RING_D - 2, true); toast('Красные — влево, синие — вправо'); }
   else { game.left = 60; spawnWave(); toast('Волна 1'); }
@@ -761,7 +764,7 @@ function gameLogic(dt) {
     if (game.hold > 1) {
       const best = getBest('classic'), rec = best == null || game.t < best;
       if (rec) setBest('classic', game.t);
-      endGame('Готово!', `Время: ${game.t.toFixed(1)} с`, rec ? 'Новый рекорд!' : `Рекорд: ${best.toFixed(1)} с`);
+      endGame('Готово!', `Время: ${game.t.toFixed(1)} с · нажатий: ${game.presses}`, rec ? 'Новый рекорд!' : `Рекорд: ${best.toFixed(1)} с`);
     }
   } else if (mode === 'colors') {
     game.left -= dt;
@@ -770,10 +773,10 @@ function gameLogic(dt) {
     if (game.hold > 1) {
       const best = getBest('colors'), rec = best == null || game.left > best;
       if (rec) setBest('colors', game.left);
-      endGame('Победа!', `Осталось времени: ${game.left.toFixed(1)} с`, rec ? 'Новый рекорд!' : `Рекорд: ${best.toFixed(1)} с в запасе`);
+      endGame('Победа!', `Осталось времени: ${game.left.toFixed(1)} с · нажатий: ${game.presses}`, rec ? 'Новый рекорд!' : `Рекорд: ${best.toFixed(1)} с в запасе`);
     } else if (game.left <= 0) {
       game.left = 0;
-      endGame('Время вышло', `Правильно надето: ${good} из ${rings.length}`, '');
+      endGame('Время вышло', `Правильно надето: ${good} из ${rings.length} · нажатий: ${game.presses}`, '');
     }
   } else {
     game.left -= dt;
@@ -789,7 +792,7 @@ function gameLogic(dt) {
       const total = game.score + rings.filter(r => r.on >= 0).length;
       const best = getBest('waves'), rec = best == null || total > best;
       if (rec) setBest('waves', total);
-      endGame('Время вышло', `Колец надето: ${total} · дошёл до волны ${game.wave}`, rec ? 'Новый рекорд!' : `Рекорд: ${best} колец`);
+      endGame('Время вышло', `Колец надето: ${total} · дошёл до волны ${game.wave} · нажатий: ${game.presses}`, rec ? 'Новый рекорд!' : `Рекорд: ${best} колец`);
     }
   }
 }
@@ -803,7 +806,12 @@ function endGame(title, text, best) {
   show('result');
 }
 
-function getBest(m) { const v = localStorage.getItem('rings_best_' + m); return v == null ? null : +v; }
+// Хранилище бывает недоступно (приватный режим, встроенные браузеры) — тогда просто без рекордов
+function getBest(m) {
+  let v = null;
+  try { v = localStorage.getItem('rings_best_' + m); } catch (e) { }
+  return v == null ? null : +v;
+}
 function setBest(m, v) { try { localStorage.setItem('rings_best_' + m, String(v)); } catch (e) { } }
 
 function refreshBest() {
@@ -838,23 +846,32 @@ function tick(dt) {
 
 // ---------- Экран и управление ----------
 const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
-let sw = 0, sh = 0, dpr = 1, S = 1, tankX = 0, tankY = 0, tankW = 0, tankH = 0, hudH = 52;
-const PAD = 8;
+let sw = 0, sh = 0, dpr = 1, S = 1, tankX = 0, tankY = 0, tankW = 0, tankH = 0, hudH = 52, wide = false, wasLand = null;
+const PAD = 8, GAUGE_W = 16;
 
+// В портрете сверху полоса со счётом; в ландшафте аквариум во всю высоту, а счёт — по бокам от него
 function layout() {
   dpr = Math.min(window.devicePixelRatio || 1, 2);
   sw = window.innerWidth; sh = window.innerHeight;
   canvas.width = Math.round(sw * dpr); canvas.height = Math.round(sh * dpr);
   canvas.style.width = sw + 'px'; canvas.style.height = sh + 'px';
-  hudH = clamp(sh * 0.07, 48, 64);
+  wide = (sw - (sh - 2 * PAD) * W / H) / 2 >= 96;
+  hudH = wide ? 0 : clamp(sh * 0.07, 48, 64);
   const availW = sw - 2 * PAD, availH = sh - hudH - 2 * PAD;
   S = Math.min(availW / W, availH / H);
   tankW = W * S; tankH = H * S;
   tankX = (sw - tankW) / 2; tankY = hudH + (availH - tankH) / 2 + PAD;
+  pauseBtn.style.left = (wide ? sw - PAD - GAUGE_W - 10 - 44 : sw / 2 + 44) + 'px';
+  pauseBtn.style.top = (wide ? PAD : Math.max(2, (hudH - 44) / 2 + 2)) + 'px';
+  // Телефон повернули — наклон отсчитываем заново от нового положения
+  const land = sw > sh;
+  if (wasLand !== null && land !== wasLand) motion.m0 = motion.z0 = null;
+  wasLand = land;
+  refreshOrient();
 }
 
 // Левая/правая половина экрана; чем выше касание, тем сильнее струя.
-// Шкала силы: в портрете — нижняя половина экрана (выше неё — максимум), в ландшафте — вся высота.
+// В портрете насосы — только две нижние четверти экрана, шкала силы — их высота; в ландшафте — вся высота.
 function strengthFromY(y) {
   const span = sh > sw ? sh / 2 : sh;
   return 0.18 + 0.82 * clamp((sh - y) / span, 0, 1);
@@ -866,13 +883,14 @@ function press(side, y, id, strong) {
   p.y = p.lastY = y == null ? 0 : y; p.lastT = performance.now();
   p.base = y == null ? (strong ? 1 : 0.65) : strengthFromY(y);
   if (navigator.vibrate) try { navigator.vibrate(6 + Math.round(p.base * 24)); } catch (e) { }
+  if (state === 'play') game.presses++;
 }
 function release(side) { pumps[side].held = false; pumps[side].id = null; }
 
 canvas.addEventListener('pointerdown', e => {
   e.preventDefault();
   initAudio();
-  if (state !== 'play') return;
+  if (state !== 'play' || (sh > sw && e.clientY < sh / 2)) return;
   const side = e.clientX < sw / 2 ? 0 : 1;
   press(side, e.clientY, e.pointerId);
   try { canvas.setPointerCapture(e.pointerId); } catch (_) { }
@@ -942,6 +960,26 @@ tiltBtn.addEventListener('click', () => {
 });
 refreshTilt();
 document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); });
+
+// Поворот экрана: браузер разрешает закрепить ориентацию только в полноэкранном режиме (Android).
+// Где нельзя (iOS, компьютер) — просим повернуть телефон самому, раскладка подстроится сама
+function refreshOrient() {
+  document.querySelectorAll('.orientBtn').forEach(b => { b.textContent = sw > sh ? 'Повернуть вертикально' : 'Повернуть горизонтально'; });
+}
+function setOrientHint(t) { document.querySelectorAll('.orientHint').forEach(h => { h.textContent = t; }); }
+async function toggleOrientation() {
+  const want = sw > sh ? 'portrait' : 'landscape', el = document.documentElement;
+  let entered = false;
+  try {
+    if (!document.fullscreenElement && el.requestFullscreen) { await el.requestFullscreen({ navigationUI: 'hide' }); entered = true; }
+    await screen.orientation.lock(want);
+    setOrientHint('');
+  } catch (e) {
+    if (entered && document.exitFullscreen) document.exitFullscreen().catch(() => { });
+    setOrientHint(want === 'landscape' ? 'Поверни телефон горизонтально — игра подстроится' : 'Поверни телефон вертикально — игра подстроится');
+  }
+}
+document.querySelectorAll('.orientBtn').forEach(b => b.addEventListener('click', toggleOrientation));
 
 // ---------- Отрисовка ----------
 function rr(x, y, w, h, r) {
@@ -1058,21 +1096,48 @@ function render(now) {
   }
 }
 
+// Насос в углу: колба с водой — сколько её осталось в насосе. Пока жмёшь — светлеет и убывает,
+// отпустил — быстро набирается; почти пустая краснеет
+function drawPump(p, x, y, w, h) {
+  ctx.fillStyle = 'rgba(0,0,0,0.25)'; rr(x, y, w, h, w / 2); ctx.fill();
+  const ih = h - 4, fh = Math.max(0, ih * p.stroke);
+  if (fh > 0.5) {
+    ctx.fillStyle = p.stroke < 0.2 ? '#ff8a7a' : p.flow > 0.05 ? '#e6fbff' : '#6fd6ff';
+    rr(x + 2, y + 2 + ih - fh, w - 4, fh, (w - 4) / 2); ctx.fill();
+  }
+  ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,255,255,0.75)'; rr(x, y, w, h, w / 2); ctx.stroke();
+}
+
 function drawHud() {
-  const y = hudH / 2 + 6;
-  ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff';
-  ctx.font = '600 15px system-ui'; ctx.textAlign = 'left';
-  ctx.fillText(mode === 'waves' ? `Волна ${game.wave}` : MODES[mode].name, Math.max(PAD, tankX), y);
+  const gh = wide ? 72 : hudH - 14, gy = wide ? PAD : 7;
+  drawPump(pumps[0], PAD, gy, GAUGE_W, gh);
+  drawPump(pumps[1], sw - PAD - GAUGE_W, gy, GAUGE_W, gh);
   let score;
   if (mode === 'colors') score = `${rings.filter(r => r.on === r.ci).length}/${rings.length}`;
   else if (mode === 'waves') score = `${game.score + rings.filter(r => r.on >= 0).length}`;
   else score = `${rings.filter(r => r.on >= 0).length}/${rings.length}`;
-  ctx.textAlign = 'right';
-  ctx.fillText(score, Math.min(sw - 60, tankX + tankW), y);
-  ctx.font = '800 26px system-ui'; ctx.textAlign = 'center';
   const t = mode === 'classic' ? game.t.toFixed(1) : `${Math.floor(Math.ceil(game.left) / 60)}:${String(Math.ceil(game.left) % 60).padStart(2, '0')}`;
-  if (mode !== 'classic' && game.left < 10) ctx.fillStyle = '#ffe14d';
-  ctx.fillText(t, sw / 2, y);
+  const name = mode === 'waves' ? `Волна ${game.wave}` : MODES[mode].name, taps = `Нажатий: ${game.presses}`;
+  const tcol = mode !== 'classic' && game.left < 10 ? '#ffe14d' : '#fff';
+  ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff';
+  if (wide) {
+    // Ландшафт: слева режим, время и нажатия, справа счёт
+    const lx = tankX / 2, rx = sw - tankX / 2, y = gy + gh + 30;
+    ctx.textAlign = 'center';
+    ctx.font = '600 16px system-ui'; ctx.fillText(name, lx, y);
+    ctx.font = '800 34px system-ui'; ctx.fillStyle = tcol; ctx.fillText(t, lx, y + 38); ctx.fillStyle = '#fff';
+    ctx.font = '800 34px system-ui'; ctx.fillText(score, rx, y + 38);
+    ctx.font = '500 13px system-ui'; ctx.globalAlpha = 0.85;
+    ctx.fillText(taps, lx, y + 72); ctx.fillText('колец', rx, y + 72);
+    ctx.globalAlpha = 1;
+  } else {
+    const y = hudH / 2 + 3, xl = PAD + GAUGE_W + 8, xr = sw - PAD - GAUGE_W - 8;
+    ctx.textAlign = 'left';
+    ctx.font = '600 15px system-ui'; ctx.fillText(name, xl, y - 8);
+    ctx.font = '500 12px system-ui'; ctx.globalAlpha = 0.85; ctx.fillText(taps, xl, y + 10); ctx.globalAlpha = 1;
+    ctx.textAlign = 'right'; ctx.font = '800 20px system-ui'; ctx.fillText(score, xr, y);
+    ctx.textAlign = 'center'; ctx.font = '800 26px system-ui'; ctx.fillStyle = tcol; ctx.fillText(t, sw / 2, y);
+  }
   ctx.textBaseline = 'alphabetic';
 }
 
