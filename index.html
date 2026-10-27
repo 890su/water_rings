@@ -11,6 +11,8 @@
     user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;
     font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#fff}
   canvas{display:block;touch-action:none}
+  /* Игровой кадр: если браузер сам повернул экран, кадр поворачиваем обратно — низ игры привязан к корпусу */
+  #root{position:fixed;left:0;top:0;overflow:hidden;transform-origin:0 0}
   .overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
     justify-content:safe center;overflow-y:auto;touch-action:pan-y;
     gap:10px;background:rgba(10,20,40,.62);text-align:center;padding:24px;box-sizing:border-box}
@@ -30,6 +32,7 @@
 </style>
 </head>
 <body>
+<div id="root">
 <canvas id="c"></canvas>
 <button id="pauseBtn" class="hidden" aria-label="Пауза">II</button>
 
@@ -42,7 +45,7 @@
   <button data-mode="colors" class="alt">Два цвета</button><div class="small" id="best-colors"></div>
   <button data-mode="waves" class="green">Волны</button><div class="small" id="best-waves"></div>
   <button id="tiltBtn" class="ghost hidden"></button>
-  <button class="ghost orientBtn"></button><div class="small orientHint"></div>
+  <button class="ghost orientBtn"></button>
   <p class="small">На компьютере: A / L или стрелки, с Shift — сильнее; Q / E — наклон, пробел — встряска</p>
 </div>
 
@@ -50,7 +53,7 @@
   <h1>Пауза</h1>
   <button id="resumeBtn">Продолжить</button>
   <button id="restartBtn" class="ghost">Заново</button>
-  <button class="ghost orientBtn"></button><div class="small orientHint"></div>
+  <button class="ghost orientBtn"></button>
   <button class="ghost toMenu">В меню</button>
 </div>
 
@@ -62,20 +65,21 @@
   <button id="againBtn">Ещё раз</button>
   <button class="ghost toMenu">В меню</button>
 </div>
+</div>
 
 <script>
 'use strict';
 
 // ---------- Мир ----------
-const W = 360, H = 648, CELL = 12, NX = W / CELL, NY = H / CELL, SX = NX + 2, NCELLS = (NX + 2) * (NY + 2);
+const CELL = 12;
 const RIM = 5, RING_D = 34, PEG_R = 3.5, G = 220, K_PAR = 1.6, K_PERP = 5.5, MAXV = 800;
 // Насос набирает воду заметно быстрее, чем выдаёт её, — как у настоящей игрушки
-const JET = 620, JET_LEN = 340, JET_W0 = 34, JET_SPREAD = 0.24, DRAIN = 1.1, REFILL = 4, VORT = 5, FLUID_DAMP = 0.6;
+const JET = 744, JET_W0 = 34, JET_SPREAD = 0.24, DRAIN = 1.1, REFILL = 4, VORT = 5, FLUID_DAMP = 0.6;
 // Надетое кольцо трётся о штырь (сильнее, если висит с наклоном) — одиночное нажатие его не сбивает,
 // а серия сильных струй может поднять над верхушкой и скинуть. PEG_SHELTER — доля потока, что до него доходит
 const PEG_SHELTER = 1, PEG_FRICTION = 3, PEG_BIND = 1, PEG_DRAG = 2, PEG_TWIST = 0.3;
 // Полка-стопор внизу штыря (ширина чуть больше кольца) — заслон для струи, см. shelfShade
-const SHELF_W = 50, SHELF_DRAG = 60, SHELF_LEAK = 0.3, SHELF_SHADOW = 110;
+const SHELF_W = 50, SHELF_DRAG = 60, SHELF_LEAK = 0.3, SHELF_SHADOW = 80;
 // Видимое кувыркание кольца вокруг своей оси: phi — угол наклона к зрителю
 // Тонущее плоское кольцо стремится лечь горизонтально (главный рычаг сложности)
 const ALIGN = 20;
@@ -83,15 +87,44 @@ const ALIGN = 20;
 const PHI_ALIGN = 6;
 // Доля выравнивания для надетого кольца: висит с наклоном, но струя ещё может его выпрямить и поднять
 const PEG_ALIGN = 0.3;
-const SPIN_REST = 0.35, SPIN_K = 0.06, SPIN_MAX = 14, SUCTION = 220;
+const SPIN_REST = 0.35, SPIN_K = 0.06, SPIN_MAX = 14, SUCTION = 264;
 // Аквариум узкий: глубина чуть больше диаметра кольца. z — глубина, плюс к зрителю.
 // Кольцо, лежащее плашмя, занимает её почти целиком и не пропускает другие кольца мимо себя;
 // разойтись по глубине могут только кольца, повёрнутые к зрителю.
 const TANK_Z = 25, Z_DAMP = 2.5, Z_JITTER = 0.5;
 const STEP = 1 / 60, SUB = 2;
-const PEG_TIP = 330, PEG_BOTTOM = H - 150;
-// Дно-горка как у игрушки: кольца скатываются к соплам
-const FLOOR = [[0, H - 60], [62, H - 6], [180, H - 48], [298, H - 6], [360, H - 60]];
+
+// Два поля — альбомное (основное) и портретное. Раскладка зеркальна: сопло в nozzleX от стенки,
+// штырь в pegX, верхушка tip и полка bottom по y, струя бьёт на jetLen. Дно-горка — кольца скатываются к соплам.
+// Отдельные константы — чтобы tools/ могли их переопределять при подборе баланса
+const L_W = 648, L_H = 360, L_NOZZLE_X = 150, L_PEG_X = 230, L_TIP = 150, L_BOTTOM = 258, L_JET_LEN = 240;
+const P_W = 360, P_H = 648, P_NOZZLE_X = 66, P_PEG_X = 115, P_TIP = 330, P_BOTTOM = 498, P_JET_LEN = 340;
+const FIELDS = {
+  landscape: {
+    W: L_W, H: L_H, nozzleX: L_NOZZLE_X, pegX: L_PEG_X, tip: L_TIP, bottom: L_BOTTOM, jetLen: L_JET_LEN,
+    floor: [[0, L_H - 46], [L_NOZZLE_X, L_H - 6], [L_W / 2, L_H - 50], [L_W - L_NOZZLE_X, L_H - 6], [L_W, L_H - 46]]
+  },
+  portrait: {
+    W: P_W, H: P_H, nozzleX: P_NOZZLE_X, pegX: P_PEG_X, tip: P_TIP, bottom: P_BOTTOM, jetLen: P_JET_LEN,
+    floor: [[0, P_H - 60], [62, P_H - 6], [P_W / 2, P_H - 48], [P_W - 62, P_H - 6], [P_W, P_H - 60]]
+  }
+};
+let field = '', W = 0, H = 0, NX = 0, NY = 0, SX = 0, NCELLS = 0, PEG_TIP = 0, PEG_BOTTOM = 0, JET_LEN = 0;
+let FLOOR = [], pegs = [], nozzles = [];
+let u, v, u0, v0, pr, dv, curl;
+
+// Всё, что зависит от размеров поля, включая сетку воды
+function setField(name) {
+  const f = FIELDS[name];
+  field = name; W = f.W; H = f.H; NX = W / CELL; NY = H / CELL; SX = NX + 2; NCELLS = (NX + 2) * (NY + 2);
+  PEG_TIP = f.tip; PEG_BOTTOM = f.bottom; JET_LEN = f.jetLen; FLOOR = f.floor;
+  pegs = [{ x: f.pegX, tip: f.tip, bottom: f.bottom }, { x: W - f.pegX, tip: f.tip, bottom: f.bottom }];
+  nozzles = [mkNozzle(f.nozzleX, H - 6, 0.3), mkNozzle(W - f.nozzleX, H - 6, -0.3)];
+  [u, v, u0, v0, pr, dv, curl] = Array.from({ length: 7 }, () => new Float64Array(NCELLS));
+}
+const START_FIELD = 'landscape';
+setField(START_FIELD);
+
 const floorY = x => {
   for (let i = 1; i < FLOOR.length; i++) {
     const [x0, y0] = FLOOR[i - 1], [x1, y1] = FLOOR[i];
@@ -99,10 +132,6 @@ const floorY = x => {
   }
   return H;
 };
-// Раскладка штырей — заготовка под уровни: штыри симметричны, PEG_X — расстояние от левой стенки
-const PEG_X = 115;
-const pegs = [{ x: PEG_X, tip: PEG_TIP, bottom: PEG_BOTTOM }, { x: W - PEG_X, tip: PEG_TIP, bottom: PEG_BOTTOM }];
-const nozzles = [mkNozzle(66, H - 6, 0.3), mkNozzle(W - 66, H - 6, -0.3)];
 const PALETTE = ['#ff4d6d', '#ffd23f', '#3ddc97', '#4cc9f0', '#b388ff', '#ff9f1c', '#f15bb5', '#9ef01a'];
 const DUO = ['#ff3b5c', '#2f7dff'];
 
@@ -115,9 +144,6 @@ const clamp = (x, a, b) => x < a ? a : x > b ? b : x;
 
 // ---------- Жидкость (stable fluids, сетка NX x NY) ----------
 const IX = (i, j) => i + SX * j;
-const u = new Float64Array(NCELLS), v = new Float64Array(NCELLS);
-const u0 = new Float64Array(NCELLS), v0 = new Float64Array(NCELLS);
-const pr = new Float64Array(NCELLS), dv = new Float64Array(NCELLS), curl = new Float64Array(NCELLS);
 
 function setBnd(b, x) {
   for (let j = 1; j <= NY; j++) {
@@ -301,9 +327,10 @@ const TILT_Z = 0.8, SHAKE_K = 250, SHAKE_DEAD = 2.5;
 const grav = { x: 0, y: 1, z: 0 }, shake = { x: 0, y: 0, z: 0 };
 const motion = { on: true, listening: false, sign: 0, tx: 0, ty: 1, tz: 0, m0: null, z0: null, keyTilt: 0, lp: null };
 
-// Оси устройства (x вправо, y к верху корпуса, z к зрителю) → оси экрана (x вправо, y вниз, z к зрителю)
+// Оси устройства (x вправо, y к верху корпуса, z к зрителю) → оси игрового кадра (x вправо, y вниз, z к зрителю).
+// Кадр привязан к корпусу через gameAngle, а не к тому, как браузер сейчас повернул экран
 function screenAxes(x, y, z) {
-  const deg = screen.orientation ? screen.orientation.angle : (window.orientation || 0), a = deg * Math.PI / 180;
+  const a = (touchDevice() ? gameAngle : screenAngle()) * Math.PI / 180;
   const c = Math.cos(a), s = Math.sin(a);
   return [x * c - y * s, -(x * s + y * c), z];
 }
@@ -771,6 +798,8 @@ function resetPumps() { for (const p of pumps) Object.assign(p, makePump()); }
 function startGame(m) {
   mode = m; initAudio(); resetFluid(); resetPumps(); resetMotion();
   if (motion.on) enableMotion();
+  // Как держат телефон при старте — так кадр и закрепляем
+  if (touchDevice()) { pickGameAngle(); layout(); lockScreen(); }
   rings = []; bubbles.length = 0; sparks.length = 0;
   game = { t: 0, left: 0, score: 0, wave: 1, hold: 0, presses: 0 };
   if (m === 'classic') { spawnRings(8, RING_D, false); toast('Надень все кольца'); }
@@ -877,13 +906,51 @@ const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
 let sw = 0, sh = 0, dpr = 1, S = 1, tankX = 0, tankY = 0, tankW = 0, tankH = 0, hudH = 52, wide = false, wasLand = null;
 const PAD = 8, GAUGE_W = 16;
 
+// ---------- Ориентация ----------
+// gameAngle — как стоит игровой кадр относительно «родной» ориентации устройства (в смысле screen.orientation.angle).
+// Выбирается при старте партии и смене поля и дальше не меняется: повернул телефон — повернулась и игра,
+// низ остаётся у того же края корпуса. Если браузер сам повернул экран, кадр поворачиваем обратно на rot.
+// На компьютере (без касаний) не поворачиваем ничего
+const root = document.getElementById('root');
+let gameAngle = 0, rot = 0;
+const touchDevice = () => navigator.maxTouchPoints > 0;
+function screenAngle() {
+  const o = window.screen && window.screen.orientation;
+  return (((o ? o.angle : window.orientation) || 0) % 360 + 360) % 360;
+}
+function pickGameAngle() {
+  const a = screenAngle(), natLand = a % 180 === 0 ? window.innerWidth > window.innerHeight : window.innerWidth <= window.innerHeight;
+  // Поле поперёк родной ориентации — кадр на 90/270, иначе 0/180; из двух берём ту, как сейчас держат
+  if ((field === 'landscape') !== natLand) gameAngle = a === 90 || a === 270 ? a : 90;
+  else gameAngle = a === 0 || a === 180 ? a : 0;
+}
+// Координаты касания из окна браузера — в игровой кадр
+function toRoot(e) {
+  const vw = window.innerWidth, vh = window.innerHeight, x = e.clientX, y = e.clientY;
+  return rot === 90 ? [y, vw - x] : rot === 180 ? [vw - x, vh - y] : rot === 270 ? [vh - y, x] : [x, y];
+}
+// Android: в полноэкранном режиме браузер даёт закрепить текущую ориентацию — тогда экран не крутится вовсе
+async function lockScreen() {
+  const el = document.documentElement;
+  try {
+    if (!document.fullscreenElement && el.requestFullscreen) await el.requestFullscreen({ navigationUI: 'hide' });
+    await screen.orientation.lock(screen.orientation.type);
+  } catch (e) { }
+}
+
 // В портрете сверху полоса со счётом; в ландшафте аквариум во всю высоту, а счёт — по бокам от него
 function layout() {
   dpr = Math.min(window.devicePixelRatio || 1, 2);
-  sw = window.innerWidth; sh = window.innerHeight;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  rot = touchDevice() ? ((gameAngle - screenAngle()) % 360 + 360) % 360 : 0;
+  const side = rot === 90 || rot === 270;
+  sw = side ? vh : vw; sh = side ? vw : vh;
+  root.style.width = sw + 'px'; root.style.height = sh + 'px';
+  root.style.transform = rot === 90 ? `translate(${vw}px,0) rotate(90deg)` : rot === 180 ? `translate(${vw}px,${vh}px) rotate(180deg)`
+    : rot === 270 ? `translate(0,${vh}px) rotate(270deg)` : '';
   canvas.width = Math.round(sw * dpr); canvas.height = Math.round(sh * dpr);
   canvas.style.width = sw + 'px'; canvas.style.height = sh + 'px';
-  wide = (sw - (sh - 2 * PAD) * W / H) / 2 >= 96;
+  wide = (sw - (sh - 2 * PAD) * W / H) / 2 >= 72;
   hudH = wide ? 0 : clamp(sh * 0.07, 48, 64);
   const availW = sw - 2 * PAD, availH = sh - hudH - 2 * PAD;
   S = Math.min(availW / W, availH / H);
@@ -918,9 +985,9 @@ function release(side) { pumps[side].held = false; pumps[side].id = null; }
 canvas.addEventListener('pointerdown', e => {
   e.preventDefault();
   initAudio();
-  if (state !== 'play' || (sh > sw && e.clientY < sh / 2)) return;
-  const side = e.clientX < sw / 2 ? 0 : 1;
-  press(side, e.clientY, e.pointerId);
+  const [x, y] = toRoot(e);
+  if (state !== 'play' || (sh > sw && y < sh / 2)) return;
+  press(x < sw / 2 ? 0 : 1, y, e.pointerId);
   try { canvas.setPointerCapture(e.pointerId); } catch (_) { }
 }, { passive: false });
 
@@ -928,10 +995,10 @@ canvas.addEventListener('pointermove', e => {
   for (let s = 0; s < 2; s++) {
     const p = pumps[s];
     if (!p.held || p.id !== e.pointerId) continue;
-    const now = performance.now(), vy = (e.clientY - p.lastY) / Math.max(1, now - p.lastT) * 1000;
+    const y = toRoot(e)[1], now = performance.now(), vy = (y - p.lastY) / Math.max(1, now - p.lastT) * 1000;
     if (vy < -400) p.boost = Math.min(0.4, Math.max(p.boost, (-vy - 400) / 2500));
-    p.y = p.lastY = e.clientY; p.lastT = now;
-    p.base = strengthFromY(e.clientY);
+    p.y = p.lastY = y; p.lastT = now;
+    p.base = strengthFromY(y);
   }
 });
 const endPointer = e => { for (let s = 0; s < 2; s++) if (pumps[s].id === e.pointerId) release(s); };
@@ -989,25 +1056,28 @@ tiltBtn.addEventListener('click', () => {
 refreshTilt();
 document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); });
 
-// Поворот экрана: браузер разрешает закрепить ориентацию только в полноэкранном режиме (Android).
-// Где нельзя (iOS, компьютер) — просим повернуть телефон самому, раскладка подстроится сама
+// Поле альбомное или портретное. Кнопка меняет само поле (аквариум, штыри, сопла) и игровой кадр под него
 function refreshOrient() {
-  document.querySelectorAll('.orientBtn').forEach(b => { b.textContent = sw > sh ? 'Повернуть вертикально' : 'Повернуть горизонтально'; });
+  document.querySelectorAll('.orientBtn').forEach(b => {
+    b.textContent = field === 'landscape' ? 'Сделать поле вертикальным' : 'Сделать поле горизонтальным';
+  });
 }
-function setOrientHint(t) { document.querySelectorAll('.orientHint').forEach(h => { h.textContent = t; }); }
-async function toggleOrientation() {
-  const want = sw > sh ? 'portrait' : 'landscape', el = document.documentElement;
-  let entered = false;
-  try {
-    if (!document.fullscreenElement && el.requestFullscreen) { await el.requestFullscreen({ navigationUI: 'hide' }); entered = true; }
-    await screen.orientation.lock(want);
-    setOrientHint('');
-  } catch (e) {
-    if (entered && document.exitFullscreen) document.exitFullscreen().catch(() => { });
-    setOrientHint(want === 'landscape' ? 'Поверни телефон горизонтально — игра подстроится' : 'Поверни телефон вертикально — игра подстроится');
-  }
+
+function changeField(name) {
+  if (name === field) return;
+  setField(name);
+  for (const s of specks) { s.x = Math.random() * W; s.y = Math.random() * H; }
+  bubbles.length = 0; sparks.length = 0;
+  resetPumps(); resetMotion();
+  pickGameAngle(); layout();
+  try { localStorage.setItem('rings_field', name); } catch (e) { }
+  if (state === 'menu') { rings = []; spawnRings(8, RING_D, false); } else startGame(mode);
 }
-document.querySelectorAll('.orientBtn').forEach(b => b.addEventListener('click', toggleOrientation));
+document.querySelectorAll('.orientBtn').forEach(b => b.addEventListener('click', () => {
+  changeField(field === 'landscape' ? 'portrait' : 'landscape');
+}));
+['orientationchange', 'resize'].forEach(ev => window.addEventListener(ev, layout));
+if (window.screen && screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener('change', layout);
 
 // ---------- Отрисовка ----------
 function rr(x, y, w, h, r) {
@@ -1052,7 +1122,7 @@ function render(now) {
 
   const tm = now / 1000;
   ctx.fillStyle = 'rgba(255,255,255,0.06)';
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < W / 120; i++) {
     const x0 = 40 + i * 120 + Math.sin(tm * 0.4 + i * 2) * 30;
     ctx.beginPath(); ctx.moveTo(x0, 0); ctx.lineTo(x0 + 40, 0); ctx.lineTo(x0 - 60, H); ctx.lineTo(x0 - 130, H); ctx.closePath(); ctx.fill();
   }
@@ -1182,10 +1252,12 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
-window.addEventListener('resize', layout);
+pickGameAngle();
 layout();
 spawnRings(8, RING_D, false);
 show('menu');
+// По умолчанию поле альбомное; выбор игрока запоминаем
+try { if (localStorage.getItem('rings_field') === 'portrait') changeField('portrait'); } catch (e) { }
 requestAnimationFrame(frame);
 </script>
 </body>
