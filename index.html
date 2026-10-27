@@ -73,7 +73,9 @@ const RIM = 5, RING_D = 34, PEG_R = 3.5, G = 220, K_PAR = 1.6, K_PERP = 5.5, MAX
 const JET = 620, JET_LEN = 340, JET_W0 = 34, JET_SPREAD = 0.24, DRAIN = 1.1, REFILL = 4, VORT = 5, FLUID_DAMP = 0.6;
 // Надетое кольцо трётся о штырь (сильнее, если висит с наклоном) — одиночное нажатие его не сбивает,
 // а серия сильных струй может поднять над верхушкой и скинуть. PEG_SHELTER — доля потока, что до него доходит
-const PEG_SHELTER = 1, PEG_FRICTION = 2, PEG_BIND = 1, PEG_DRAG = 2, PEG_TWIST = 0.3;
+const PEG_SHELTER = 1, PEG_FRICTION = 3, PEG_BIND = 1, PEG_DRAG = 2, PEG_TWIST = 0.3;
+// Полка-стопор внизу штыря (ширина чуть больше кольца) — заслон для струи, см. shelfShade
+const SHELF_W = 50, SHELF_DRAG = 60, SHELF_LEAK = 0.3, SHELF_SHADOW = 110;
 // Видимое кувыркание кольца вокруг своей оси: phi — угол наклона к зрителю
 // Тонущее плоское кольцо стремится лечь горизонтально (главный рычаг сложности)
 const ALIGN = 20;
@@ -179,15 +181,26 @@ function vorticity(dt) {
   }
 }
 
-// Штырь тонкий и поток почти не держит, но подтормаживает воду вдоль стержня — за ним срываются завихрения
-function pegWake(dt) {
-  const e = 1 - Math.exp(-PEG_DRAG * dt);
-  for (const g of pegs) {
-    const gx = g.x / CELL + 0.5, i0 = gx | 0, s = gx - i0;
-    for (let j = Math.floor(g.tip / CELL) + 1; j <= Math.floor(g.bottom / CELL) + 1; j++) {
-      const k = IX(i0, j), f0 = 1 - e * (1 - s), f1 = 1 - e * s;
-      u[k] *= f0; v[k] *= f0; u[k + 1] *= f1; v[k + 1] *= f1;
+// Тормозим воду в прямоугольнике пропорционально тому, какую долю клетки он закрывает;
+// ku / kv — сила торможения поперёк x и y
+function blockRect(x0, x1, y0, y1, ku, kv, dt) {
+  const eu = 1 - Math.exp(-ku * dt), ev = 1 - Math.exp(-kv * dt);
+  for (let j = Math.max(1, Math.floor(y0 / CELL) + 1); j <= Math.min(NY, Math.floor(y1 / CELL) + 1); j++) {
+    const oy = Math.max(0, Math.min(y1, j * CELL) - Math.max(y0, (j - 1) * CELL)) / CELL;
+    for (let i = Math.max(1, Math.floor(x0 / CELL) + 1); i <= Math.min(NX, Math.floor(x1 / CELL) + 1); i++) {
+      const f = oy * Math.max(0, Math.min(x1, i * CELL) - Math.max(x0, (i - 1) * CELL)) / CELL, k = IX(i, j);
+      u[k] *= 1 - eu * f; v[k] *= 1 - ev * f;
     }
+  }
+}
+
+// Штырь тонкий и поток почти не держит, но подтормаживает воду вдоль стержня — за ним срываются завихрения.
+// Полка-стопор внизу — пластина поперёк струи: вертикальный поток почти не пропускает, вода обтекает её
+// по краям, над полкой затишье (лежащие на ней кольца в «тени»), а с краёв срываются вихри
+function pegWake(dt) {
+  for (const g of pegs) {
+    blockRect(g.x - PEG_R, g.x + PEG_R, g.tip, g.bottom, PEG_DRAG * CELL / (2 * PEG_R), PEG_DRAG * CELL / (2 * PEG_R), dt);
+    blockRect(g.x - SHELF_W / 2, g.x + SHELF_W / 2, g.bottom - 3, g.bottom + 4, SHELF_DRAG * 0.2, SHELF_DRAG, dt);
   }
 }
 
@@ -243,10 +256,25 @@ function inject(side) {
     const f = Math.max(0, along) / len;
     // у стенок струю гасим, иначе она "прилипает" к стеклу и уходит вдоль него
     const cx = (i - 0.5) * CELL, wall = clamp(Math.min(cx, W - cx) / 50, 0, 1);
-    const a = 0.4 * (1 - f) * (1 - perp / width) * wall, target = sp * (1 - 0.55 * f), k = IX(i, j);
+    const a = 0.4 * (1 - f) * (1 - perp / width) * wall * shelfShade(mx, my, cx, (j - 0.5) * CELL);
+    const target = sp * (1 - 0.55 * f), k = IX(i, j);
     u[k] += (n.dx * target - u[k]) * a;
     v[k] += (n.dy * target - v[k]) * a;
   }
+}
+
+// Полка-стопор заслоняет струю: точке за полкой (прямая к соплу проходит через полку) достаётся
+// лишь SHELF_LEAK напора. Края тени размыты, а за SHELF_SHADOW px над полкой поток уже сомкнулся —
+// кольцо на полке в тени, приподнятое выше — снова под струёй
+function shelfShade(mx, my, x, y) {
+  let k = 1;
+  for (const g of pegs) {
+    if (y >= g.bottom || my <= g.bottom || g.bottom - y >= SHELF_SHADOW) continue;
+    const xi = mx + (x - mx) * (my - g.bottom) / (my - y);
+    const cover = clamp((SHELF_W / 2 + 4 - Math.abs(xi - g.x)) / 8, 0, 1) * (1 - (g.bottom - y) / SHELF_SHADOW);
+    k *= 1 - (1 - SHELF_LEAK) * cover;
+  }
+  return k;
 }
 
 // Насос набирает воду обратно через сопло — вдоль дна к нему тянет кольца
@@ -1056,8 +1084,8 @@ function render(now) {
     const pg = ctx.createLinearGradient(g.x - PEG_R, 0, g.x + PEG_R, 0);
     pg.addColorStop(0, '#8d9bb0'); pg.addColorStop(0.4, '#ffffff'); pg.addColorStop(1, '#7a879b');
     ctx.fillStyle = pg; rr(g.x - PEG_R, g.tip - PEG_R, PEG_R * 2, g.bottom - g.tip + PEG_R, PEG_R); ctx.fill();
-    ctx.fillStyle = '#dfe6ef'; rr(g.x - 16, g.bottom - 3, 32, 7, 3.5); ctx.fill();
-    ctx.fillStyle = 'rgba(0,0,0,0.15)'; rr(g.x - 16, g.bottom + 1, 32, 3, 1.5); ctx.fill();
+    ctx.fillStyle = '#dfe6ef'; rr(g.x - SHELF_W / 2, g.bottom - 3, SHELF_W, 7, 3.5); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.15)'; rr(g.x - SHELF_W / 2, g.bottom + 1, SHELF_W, 3, 1.5); ctx.fill();
     if (mode === 'colors' && state !== 'menu') {
       ctx.beginPath(); ctx.arc(g.x, g.tip, PEG_R + 2.5, 0, Math.PI * 2); ctx.fillStyle = DUO[k]; ctx.fill();
     }
