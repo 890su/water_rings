@@ -1,4 +1,5 @@
 // Ввод: касания и мышь (насос — по половине экрана, сила — по высоте), клавиатура.
+import { rng } from './core/rng.js';
 import { P } from './core/params.js';
 import { clamp } from './core/field.js';
 import { pumps, pumpAt } from './core/pumps.js';
@@ -63,7 +64,7 @@ export function bindInput(ui) {
     if (e.code === 'Escape' || e.code === 'KeyP') { if (G.state === 'play') ui.pause(); else if (G.state === 'pause') ui.resume(); return; }
     // Без телефона: Q / E — наклон, пробел — стукнуть по аквариуму снизу
     if (e.code === 'KeyQ' || e.code === 'KeyE') { motion.keyTilt = e.code === 'KeyQ' ? -1 : 1; return; }
-    if (e.code === 'Space') { e.preventDefault(); shake.x = (Math.random() - 0.5) * 1600; shake.y = -4000;
+    if (e.code === 'Space') { e.preventDefault(); shake.x = (rng.game() - 0.5) * 1600; shake.y = -4000;
       if (G.state === 'play') { initAudio(); bubbleSound(0, 1); bubbleSound(1, 1); } return; }
     const s = keyPump(e.code);
     if (s === undefined || e.repeat || G.state !== 'play') return;

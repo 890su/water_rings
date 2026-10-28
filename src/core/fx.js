@@ -1,4 +1,5 @@
 // Украшения: пузыри от струй, искры от надетых колец, пылинки в воде. На физику не влияют.
+import { rng } from './rng.js';
 import { P } from './params.js';
 import { W, H, nozzles, clamp } from './field.js';
 import { u, v, sample } from './fluid.js';
@@ -8,12 +9,12 @@ import { grav } from './motion.js';
 export const bubbles = [], sparks = [], specks = [];
 // Пылинки раскладываются по размерам поля — вызывать после setField
 export function initSpecks() {
-  for (let i = 0; i < 90; i++) specks.push({ x: Math.random() * W, y: Math.random() * H });
+  for (let i = 0; i < 90; i++) specks.push({ x: rng.fx() * W, y: rng.fx() * H });
 }
 
 export function burst(x, y, col, n) {
   for (let i = 0; i < n; i++) {
-    const a = Math.random() * Math.PI * 2, s = 40 + Math.random() * 90;
+    const a = rng.fx() * Math.PI * 2, s = 40 + rng.fx() * 90;
     sparks.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.6, col });
   }
 }
@@ -25,7 +26,7 @@ export function updateFx(dt) {
     while (p.emit >= 1) {
       p.emit -= 1;
       if (bubbles.length < 320) bubbles.push({
-        x: n.x + (Math.random() - 0.5) * 10, y: n.y - 6, r: 1.2 + Math.random() * 3.2,
+        x: n.x + (rng.fx() - 0.5) * 10, y: n.y - 6, r: 1.2 + rng.fx() * 3.2,
         vx: n.dx * p.flow * P.JET * 0.5, vy: n.dy * p.flow * P.JET * 0.5
       });
     }
@@ -44,7 +45,7 @@ export function updateFx(dt) {
   for (const s of specks) {
     s.x += (sample(u, s.x, s.y) + 4 * grav.x) * dt;
     s.y += (sample(v, s.x, s.y) + 4 * grav.y) * dt;
-    if (s.x < 2 || s.x > W - 2 || s.y < 2 || s.y > H - 2) { s.x = 4 + Math.random() * (W - 8); s.y = 4 + Math.random() * (H - 8); }
+    if (s.x < 2 || s.x > W - 2 || s.y < 2 || s.y > H - 2) { s.x = 4 + rng.fx() * (W - 8); s.y = 4 + rng.fx() * (H - 8); }
   }
   for (let i = sparks.length - 1; i >= 0; i--) {
     const s = sparks[i];

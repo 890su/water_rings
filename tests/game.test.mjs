@@ -6,6 +6,7 @@ import { setField } from '../src/core/field.js';
 import { startGame, tick } from '../src/core/game.js';
 import { G } from '../src/core/state.js';
 import { world } from '../src/core/rings.js';
+import { setSeed } from '../src/core/rng.js';
 
 setField(P.START_FIELD);
 
@@ -19,6 +20,8 @@ test('startGame без DOM начинает партию «Классики» с
 
 test('подмена параметра действует на следующий шаг', () => {
   const was = P.G;
+  // Одно зерно для обеих партий — одинаковая раскладка колец, различается только сила тяжести
+  setSeed(5);
   try {
     startGame('classic');
     const y0 = world.rings.map(r => r.a.y);
@@ -31,5 +34,5 @@ test('подмена параметра действует на следующи
     for (let i = 0; i < 30; i++) tick(P.STEP);
     const fall1 = Math.max(...world.rings.map((r, i) => r.a.y - y1[i]));
     assert.ok(fall1 > fall0, `с силой тяжести кольца падают глубже: ${fall1} > ${fall0}`);
-  } finally { P.G = was; }
+  } finally { P.G = was; setSeed(null); }
 });

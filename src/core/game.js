@@ -1,5 +1,6 @@
 // Правила игры: режимы, старт и конец партии, волны, рекорды, подсказка первой игры, демо в меню, игровой шаг.
 // Без DOM: всё браузерное (звук, экран, оверлеи, итоги) — через hooks.
+import { rng, restartGameRng } from './rng.js';
 import { P } from './params.js';
 import { W, H, PEG_TIP, pegs, clamp } from './field.js';
 import { resetFluid, fluidStep } from './fluid.js';
@@ -21,7 +22,7 @@ export function toast(t) { G.toastText = t; G.toastT = 1.8; }
 
 
 export function startGame(m) {
-  G.mode = m; hooks.audioStart(); resetFluid(); resetPumps(); resetMotion();
+  G.mode = m; restartGameRng(); hooks.audioStart(); resetFluid(); resetPumps(); resetMotion();
   if (motion.on) enableMotion();
   // Как держат телефон при старте — так кадр и закрепляем
   hooks.onStart();
@@ -116,9 +117,9 @@ export let demoT = 1;
 export function demo(dt) {
   demoT -= dt;
   if (demoT > 0) return;
-  const p = pumps[Math.floor(Math.random() * pumps.length)];
-  if (!p.held) { p.held = true; p.base = 0.45 + Math.random() * 0.55; p.auto = 0.2 + Math.random() * 0.5; }
-  demoT = 0.6 + Math.random() * 1.6;
+  const p = pumps[Math.floor(rng.fx() * pumps.length)];
+  if (!p.held) { p.held = true; p.base = 0.45 + rng.fx() * 0.55; p.auto = 0.2 + rng.fx() * 0.5; }
+  demoT = 0.6 + rng.fx() * 1.6;
 }
 
 export function tick(dt) {

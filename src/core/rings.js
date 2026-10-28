@@ -1,4 +1,5 @@
 // Кольца: физика колец (пара частиц на обод, глубина, вращение к зрителю), столкновения, надевание на столбики.
+import { rng } from './rng.js';
 import { P } from './params.js';
 import { W, H, NX, NY, PEG_TIP, PEG_BOTTOM, FLOOR, pegs, nozzles, floorY, shade, clamp } from './field.js';
 import { u, v, curl, sample } from './fluid.js';
@@ -18,11 +19,11 @@ export function makeRing(x, y, ang, D, col, ci) {
     a: { x: x - hx, y: y - hy, px: x - hx, py: y - hy },
     b: { x: x + hx, y: y + hy, px: x + hx, py: y + hy },
     D, col, dark: shade(col, 0.6), ci, on: -1, shown: -1, tinkT: 0,
-    phi: P.SPIN_REST + (Math.random() < 0.5 ? 0 : Math.PI), om: 0, z: 0, pz: 0, hook: -1, support: false,
+    phi: P.SPIN_REST + (rng.game() < 0.5 ? 0 : Math.PI), om: 0, z: 0, pz: 0, hook: -1, support: false,
     mark: pegs.map(() => false), eng: pegs.map(() => false)
   };
   updateDepth(R);
-  R.z = R.pz = (Math.random() * 2 - 1) * R.zWall;
+  R.z = R.pz = (rng.game() * 2 - 1) * R.zWall;
   return R;
 }
 
@@ -43,14 +44,14 @@ export function spawnRings(n, D, duo) {
   for (let i = 0; i < n; i++) {
     let x = 0, y = 0;
     for (let tries = 0; tries < 60; tries++) {
-      x = D / 2 + P.RIM + 6 + Math.random() * (W - D - 2 * P.RIM - 12);
-      y = floorY(x) - P.RIM - 6 - Math.random() * 70;
+      x = D / 2 + P.RIM + 6 + rng.game() * (W - D - 2 * P.RIM - 12);
+      y = floorY(x) - P.RIM - 6 - rng.game() * 70;
       const ok = pegs.every(g => Math.abs(x - g.x) > D / 2 + P.RIM + 6) &&
         world.rings.every(r => Math.hypot((r.a.x + r.b.x) / 2 - x, (r.a.y + r.b.y) / 2 - y) > D * 0.9);
       if (ok) break;
     }
     const ci = duo ? i % 2 : i % PALETTE.length;
-    world.rings.push(makeRing(x, y, (Math.random() - 0.5) * 0.8, D, duo ? DUO[ci] : PALETTE[ci], ci));
+    world.rings.push(makeRing(x, y, (rng.game() - 0.5) * 0.8, D, duo ? DUO[ci] : PALETTE[ci], ci));
   }
 }
 
@@ -326,7 +327,7 @@ export function updateSpin(R, dt) {
   const speed = Math.hypot(vx, vy) / (P.STEP / P.SUB);
   const rel = Math.hypot(vx / (P.STEP / P.SUB) - sample(u, cx, cy), vy / (P.STEP / P.SUB) - sample(v, cx, cy));
   const target = clamp(-sample(curl, cx, cy) * P.SPIN_K, -P.SPIN_MAX, P.SPIN_MAX);
-  R.om += (target - R.om) * (1 - Math.exp(-3 * dt)) + (Math.random() - 0.5) * rel * 0.02;
+  R.om += (target - R.om) * (1 - Math.exp(-3 * dt)) + (rng.game() - 0.5) * rel * 0.02;
   // Тонущее кольцо и само разворачивается плашмя, но вихрь его легко перебарывает; легшее на дно — ложится плашмя сразу.
   // Надетое висит как повисло (трение о стержень гасит вращение), а легши на полку или на кольцо под ним —
   // выравнивается в ровную стопку. «Плашмя» — относительно силы тяжести, с учётом наклона телефона
@@ -349,7 +350,7 @@ export function updateSpin(R, dt) {
     }
   }
   // Завихрения понемногу гоняют кольцо вперёд-назад по глубине
-  const j = (Math.random() - 0.5) * rel * P.Z_JITTER * dt;
+  const j = (rng.game() - 0.5) * rel * P.Z_JITTER * dt;
   R.z += j; R.pz += j;
 }
 

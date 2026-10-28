@@ -1,4 +1,5 @@
 // Наклон и встряска телефона.
+import { rng } from './rng.js';
 import { P } from './params.js';
 import { W, H, NX, NY, clamp } from './field.js';
 import { u, v, IX } from './fluid.js';
@@ -82,8 +83,8 @@ export function updateMotion(dt) {
   const k = 1 - Math.exp(-12 * dt);
   grav.x += (tx - grav.x) * k; grav.y += (ty - grav.y) * k; grav.z += ((motion.on ? motion.tz : 0) - grav.z) * k;
   const s = Math.hypot(shake.x, shake.y);
-  if (s > 1200 && Math.random() < 0.25) {
-    swirl(30 + Math.random() * (W - 60), 60 + Math.random() * (H - 160), (Math.random() < 0.5 ? -1 : 1) * Math.min(s, 6000) * 0.08, 50);
+  if (s > 1200 && rng.game() < 0.25) {
+    swirl(30 + rng.game() * (W - 60), 60 + rng.game() * (H - 160), (rng.game() < 0.5 ? -1 : 1) * Math.min(s, 6000) * 0.08, 50);
   }
   const e = Math.exp(-30 * dt);
   shake.x *= e; shake.y *= e; shake.z *= e;
