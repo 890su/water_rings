@@ -19,6 +19,7 @@
   .hidden{display:none!important}
   h1{margin:0;font-size:40px;letter-spacing:1px;text-shadow:0 3px 0 rgba(0,0,0,.25)}
   p{margin:0;max-width:340px;line-height:1.4;opacity:.92}
+  .intro{max-width:760px;font-size:21px;font-weight:600;line-height:1.4;opacity:1;text-shadow:0 2px 5px rgba(0,0,0,.5)}
   .sub{opacity:.75;margin-bottom:6px}
   .small{font-size:13px;opacity:.75;min-height:16px}
   button{font:inherit;font-size:19px;font-weight:700;color:#fff;border:0;border-radius:16px;padding:14px 22px;
@@ -27,15 +28,17 @@
   button.alt{background:linear-gradient(#ff6b8a,#d8264d);box-shadow:0 5px 0 #8a0d27}
   button.green{background:linear-gradient(#3fd68f,#16a35f);box-shadow:0 5px 0 #0b6b3c}
   button.ghost{background:rgba(255,255,255,.14);box-shadow:none}
+  .soundOpts{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+  .soundOpts button{min-width:0;padding:9px 13px;font-size:14px}
   #pauseBtn{position:fixed;top:4px;left:50%;min-width:0;width:44px;height:44px;padding:0;font-size:16px;
     border-radius:12px;background:rgba(0,0,0,.22);box-shadow:none}
   .modes,.opts{display:flex;flex-direction:column;align-items:center;gap:10px}
   .mode{display:flex;flex-direction:column;align-items:center;gap:4px}
   /* Низкий кадр (альбомный телефон): режимы и настройки в ряд, без длинного абзаца — меню влезает без прокрутки */
-  #root.short .overlay{gap:8px;padding:12px 16px}
+  #root.short .overlay{gap:6px;padding:10px 16px}
   #root.short h1{font-size:30px}
-  #root.short .intro,#root.short .keys{display:none}
-  #root.short .sub{margin-bottom:2px}
+  #root.short .keys,#root.short .sub{display:none}
+  #root.short .intro{font-size:18px;line-height:1.3;max-width:740px}
   #root.short .modes,#root.short .opts{flex-direction:row;flex-wrap:wrap;justify-content:center}
   #root.short .modes button{min-width:150px;padding:12px 16px}
   #root.short .opts button,#root.short .overlay>button{min-width:0;font-size:16px;padding:10px 18px}
@@ -58,8 +61,11 @@
   </div>
   <div class="opts">
     <button id="tiltBtn" class="ghost hidden"></button>
-    <button class="ghost orientBtn"></button>
     <button id="howBtn" class="ghost">Как играть</button>
+  </div>
+  <div class="soundOpts">
+    <button class="ghost musicBtn" aria-pressed="true">Музыка: вкл</button>
+    <button class="ghost sfxBtn" aria-pressed="true">Звуки: вкл</button>
   </div>
   <p class="small keys">На компьютере: A / L или стрелки, с Shift — сильнее; Q / E — наклон, пробел — встряска</p>
 </div>
@@ -68,7 +74,10 @@
   <h1>Пауза</h1>
   <button id="resumeBtn">Продолжить</button>
   <button id="restartBtn" class="ghost">Заново</button>
-  <button class="ghost orientBtn"></button>
+  <div class="soundOpts">
+    <button class="ghost musicBtn" aria-pressed="true">Музыка: вкл</button>
+    <button class="ghost sfxBtn" aria-pressed="true">Звуки: вкл</button>
+  </div>
   <button class="ghost toMenu">В меню</button>
 </div>
 
@@ -111,19 +120,14 @@ const SPIN_REST = 0.35, SPIN_K = 0.06, SPIN_MAX = 14, SUCTION = 264;
 const TANK_Z = 25, Z_DAMP = 2.5, Z_JITTER = 0.5;
 const STEP = 1 / 60, SUB = 2;
 
-// Два поля — альбомное (по умолчанию) и портретное. Раскладка зеркальна: сопло в nozzleX от стенки,
+// Только альбомное поле. Раскладка зеркальна: сопло в nozzleX от стенки,
 // штырь в pegX, верхушка tip и полка bottom по y, струя бьёт на jetLen. Дно-горка — кольца скатываются к соплам.
 // Отдельные константы — чтобы tools/ могли их переопределять при подборе баланса
 const L_W = 648, L_H = 360, L_NOZZLE_X = 150, L_PEG_X = 230, L_TIP = 150, L_BOTTOM = 258, L_JET_LEN = 240;
-const P_W = 360, P_H = 648, P_NOZZLE_X = 66, P_PEG_X = 115, P_TIP = 330, P_BOTTOM = 498, P_JET_LEN = 340;
 const FIELDS = {
   landscape: {
     W: L_W, H: L_H, nozzleX: L_NOZZLE_X, pegX: L_PEG_X, tip: L_TIP, bottom: L_BOTTOM, jetLen: L_JET_LEN,
     floor: [[0, L_H - 46], [L_NOZZLE_X, L_H - 6], [L_W / 2, L_H - 50], [L_W - L_NOZZLE_X, L_H - 6], [L_W, L_H - 46]]
-  },
-  portrait: {
-    W: P_W, H: P_H, nozzleX: P_NOZZLE_X, pegX: P_PEG_X, tip: P_TIP, bottom: P_BOTTOM, jetLen: P_JET_LEN,
-    floor: [[0, P_H - 60], [62, P_H - 6], [P_W / 2, P_H - 48], [P_W - 62, P_H - 6], [P_W, P_H - 60]]
   }
 };
 let field = '', W = 0, H = 0, NX = 0, NY = 0, SX = 0, NCELLS = 0, PEG_TIP = 0, PEG_BOTTOM = 0, JET_LEN = 0;
@@ -139,7 +143,7 @@ function setField(name) {
   nozzles = [mkNozzle(f.nozzleX, H - 6, 0.3), mkNozzle(W - f.nozzleX, H - 6, -0.3)];
   [u, v, u0, v0, pr, dv, curl] = Array.from({ length: 7 }, () => new Float64Array(NCELLS));
 }
-// По умолчанию поле альбомное; кнопка в меню переворачивает его в портретное, выбор запоминается
+// Поле всегда альбомное; прежняя настройка ориентации не используется.
 const START_FIELD = 'landscape';
 setField(START_FIELD);
 
@@ -777,7 +781,7 @@ function checkThreads(dt) {
     if (R.on === R.shown) continue;
     if (R.on >= 0 && state === 'play' && R.tinkT <= 0) {
       const good = mode !== 'colors' || R.on === R.ci;
-      tink(good ? 1320 : 330);
+      soundCue(good ? 'ring' : 'wrong');
       burst((R.a.x + R.b.x) / 2, (R.a.y + R.b.y) / 2, good ? R.col : '#ffffff', 8);
       R.tinkT = 0.6;
     }
@@ -832,34 +836,113 @@ function updateFx(dt) {
 }
 
 // ---------- Звук ----------
-let actx = null, noiseGain = null;
+// Автономный синтезатор: без файлов, шумовых петель и игрового Math.random.
+let actx = null, audioMaster = null, musicBus = null, sfxBus = null;
+let musicOn = true, sfxOn = true, musicStep = 0, nextMusic = 0, audioSeed = 173;
+const audioVoices = new Set(), nextBubble = [0, 0];
+const MUSIC_STEP = 0.375; // 80 BPM, спокойные восьмые
+const MUSIC_NOTES = [
+  76, 0, 79, 0, 81, 79, 0, 76, 74, 0, 72, 0, 74, 0, 0, 0,
+  72, 0, 76, 0, 79, 0, 81, 0, 79, 76, 0, 74, 72, 0, 0, 0,
+  74, 0, 77, 0, 81, 79, 0, 77, 76, 0, 74, 0, 72, 0, 0, 0,
+  74, 0, 79, 0, 83, 0, 81, 79, 77, 0, 74, 0, 79, 0, 0, 0
+];
+const MUSIC_CHORDS = [[48, 55, 64], [45, 52, 60], [53, 60, 69], [43, 50, 62]];
+try {
+  musicOn = localStorage.getItem('rings_music') !== '0';
+  sfxOn = localStorage.getItem('rings_sfx') !== '0';
+} catch (_) { }
+const noteHz = midi => 440 * Math.pow(2, (midi - 69) / 12);
+function soundRandom() {
+  audioSeed = (Math.imul(audioSeed, 1664525) + 1013904223) >>> 0;
+  return audioSeed / 4294967296;
+}
 function initAudio() {
-  if (actx) { if (actx.state === 'suspended') actx.resume(); return; }
   try {
-    actx = new (window.AudioContext || window.webkitAudioContext)();
-    const buf = actx.createBuffer(1, actx.sampleRate * 2, actx.sampleRate), d = buf.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-    const src = actx.createBufferSource(); src.buffer = buf; src.loop = true;
-    const f = actx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 420;
-    noiseGain = actx.createGain(); noiseGain.gain.value = 0;
-    src.connect(f).connect(noiseGain).connect(actx.destination);
-    src.start();
+    if (!actx) {
+      const Audio = window.AudioContext || window.webkitAudioContext;
+      if (!Audio) return;
+      actx = new Audio();
+      audioMaster = actx.createGain(); audioMaster.gain.value = 0.7;
+      musicBus = actx.createGain(); musicBus.gain.value = 0;
+      sfxBus = actx.createGain(); sfxBus.gain.value = sfxOn ? 0.6 : 0;
+      musicBus.connect(audioMaster); sfxBus.connect(audioMaster);
+      audioMaster.connect(actx.destination);
+      nextMusic = actx.currentTime + 0.04;
+    }
+    if (actx.state === 'suspended') actx.resume().catch(() => {});
   } catch (e) { actx = null; }
 }
-function tink(freq) {
+function stopVoices(bus) {
+  for (const v of audioVoices) if (!bus || v.bus === bus) {
+    try { v.o.stop(); } catch (_) { }
+    v.o.disconnect(); v.g.disconnect(); audioVoices.delete(v);
+  }
+}
+function audioScene() {
   if (!actx) return;
-  const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
-  o.type = 'sine'; o.frequency.value = freq;
-  g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(0.22, t + 0.01);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
-  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + 0.4);
+  const quiet = document.hidden || state === 'pause', t = actx.currentTime;
+  audioMaster.gain.setTargetAtTime(quiet ? 0 : 0.7, t, 0.04);
+  musicBus.gain.setTargetAtTime(!quiet && musicOn && (state === 'play' || state === 'menu') ? 0.16 : 0, t, 0.15);
+  sfxBus.gain.setTargetAtTime(sfxOn ? 0.6 : 0, t, 0.02);
+  if (quiet || !musicOn || state === 'over') {
+    stopVoices(quiet ? null : musicBus);
+    nextMusic = t + 0.04;
+  }
+  if (document.hidden && actx.state === 'running') actx.suspend().catch(() => {});
+}
+function audioTone(freq, at, duration, volume, bus, endFreq = freq, attack = 0.012) {
+  if (!actx || document.hidden || state === 'pause' || audioVoices.size >= 24) return;
+  if ((bus === musicBus && !musicOn) || (bus === sfxBus && !sfxOn)) return;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = 'sine'; o.frequency.setValueAtTime(freq, at);
+  if (freq !== endFreq) o.frequency.exponentialRampToValueAtTime(endFreq, at + duration * 0.85);
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(volume, at + attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+  o.connect(g); g.connect(bus);
+  const voice = { o, g, bus }; audioVoices.add(voice);
+  o.onended = () => { o.disconnect(); g.disconnect(); audioVoices.delete(voice); };
+  o.start(at); o.stop(at + duration + 0.025);
+}
+function bubbleSound(side, strength = 0.5, small = false) {
+  if (!actx || !sfxOn || state !== 'play') return;
+  const t = actx.currentTime, f = (side ? 420 : 340) * (0.88 + soundRandom() * 0.32);
+  audioTone(f * 1.7, t, small ? 0.10 : 0.17, small ? 0.07 : 0.10 + strength * 0.045, sfxBus, f * 0.65);
+  if (!small) audioTone(f * 1.15, t + 0.065, 0.13, 0.065, sfxBus, f * 0.55);
+  nextBubble[side] = t + 0.15 + soundRandom() * 0.10;
+}
+function soundCue(name) {
+  if (!actx || !sfxOn) return;
+  const cues = {
+    start: [72, 76, 79], ring: [84, 91], wrong: [67, 64],
+    wave: [79, 84, 88, 91], win: [72, 76, 79, 84, 88],
+    end: [79, 76, 72], tap: [79]
+  };
+  const notes = cues[name] || cues.tap, t = actx.currentTime;
+  notes.forEach((n, i) => audioTone(noteHz(n), t + i * 0.09, name === 'win' ? 0.5 : 0.27,
+    name === 'ring' ? 0.12 : 0.08, sfxBus));
 }
 function audioUpdate() {
-  if (!noiseGain) return;
-  const level = state === 'play' ? (pumps[0].flow + pumps[1].flow) * 0.14 : 0;
-  noiseGain.gain.setTargetAtTime(level, actx.currentTime, 0.04);
+  if (!actx || actx.state !== 'running' || document.hidden || state === 'pause') return;
+  const t = actx.currentTime;
+  if (musicOn && (state === 'play' || state === 'menu')) {
+    if (nextMusic < t - 0.2) nextMusic = t + 0.025; // Не догоняем пропущенные ноты.
+    while (nextMusic < t + 0.12) {
+      const step = musicStep % MUSIC_NOTES.length, note = MUSIC_NOTES[step];
+      if (note) audioTone(noteHz(note), nextMusic, 0.65, 0.095, musicBus);
+      if (step % 16 === 0) for (const n of MUSIC_CHORDS[step / 16]) {
+        audioTone(noteHz(n), nextMusic, 5.6, 0.035, musicBus, noteHz(n), 0.35);
+      }
+      nextMusic += MUSIC_STEP; musicStep++;
+    }
+  }
+  if (state === 'play' && sfxOn) for (let side = 0; side < 2; side++) {
+    const p = pumps[side];
+    if (p.held && p.flow > 0.08 && t >= nextBubble[side]) bubbleSound(side, p.flow, true);
+  }
 }
+// ---------- Конец звука ----------
 
 // ---------- Режимы и игра ----------
 const MODES = {
@@ -886,6 +969,7 @@ function startGame(m) {
   state = 'play';
   if (!tutSeen() || tut.force) tutStart();
   show(null);
+  soundCue('start');
 }
 
 // ---------- Подсказка для первой игры ----------
@@ -937,7 +1021,7 @@ function gameLogic(dt) {
       for (const R of rings) burst((R.a.x + R.b.x) / 2, (R.a.y + R.b.y) / 2, R.col, 6);
       game.score += rings.length;
       game.wave++; game.left += 12; game.hold = 0;
-      rings = []; spawnWave(); tink(1760);
+      rings = []; spawnWave(); soundCue('wave');
       toast(`Волна ${game.wave}  +12 с`);
     } else if (game.left <= 0) {
       game.left = 0;
@@ -956,6 +1040,7 @@ function endGame(title, text, best) {
   document.getElementById('resText').textContent = text;
   document.getElementById('resBest').textContent = best;
   show('result');
+  soundCue(title === 'Готово!' || title === 'Победа!' ? 'win' : 'end');
 }
 
 // Хранилище бывает недоступно (приватный режим, встроенные браузеры) — тогда просто без рекордов
@@ -993,7 +1078,6 @@ function tick(dt) {
   updateFx(dt);
   if (state === 'play') { gameLogic(dt); tutUpdate(dt); }
   if (toastT > 0) toastT -= dt;
-  audioUpdate();
 }
 
 // ---------- Экран и управление ----------
@@ -1003,7 +1087,7 @@ const PAD = 8, GAUGE_W = 16;
 
 // ---------- Ориентация ----------
 // gameAngle — как стоит игровой кадр относительно «родной» ориентации устройства (в смысле screen.orientation.angle).
-// Выбирается при старте партии и смене поля и дальше не меняется: повернул телефон — повернулась и игра,
+// Всегда основная альбомная ориентация, без переключения поля.
 // низ остаётся у того же края корпуса. Если браузер сам повернул экран, кадр поворачиваем обратно на rot.
 // На компьютере (без касаний) не поворачиваем ничего
 const root = document.getElementById('root');
@@ -1016,21 +1100,26 @@ function screenAngle() {
 }
 function pickGameAngle() {
   const a = screenAngle(), natLand = a % 180 === 0 ? window.innerWidth > window.innerHeight : window.innerWidth <= window.innerHeight;
-  // Поле поперёк родной ориентации — кадр на 90/270, иначе 0/180; из двух берём ту, как сейчас держат
-  if ((field === 'landscape') !== natLand) gameAngle = a === 90 || a === 270 ? a : 90;
-  else gameAngle = a === 0 || a === 180 ? a : 0;
+  gameAngle = natLand ? 0 : 90;
 }
 // Координаты касания из окна браузера — в игровой кадр
 function toRoot(e) {
   const vw = window.innerWidth, vh = window.innerHeight, x = e.clientX, y = e.clientY;
   return rot === 90 ? [y, vw - x] : rot === 180 ? [vw - x, vh - y] : rot === 270 ? [vh - y, x] : [x, y];
 }
-// Android: в полноэкранном режиме браузер даёт закрепить текущую ориентацию — тогда экран не крутится вовсе
+// Приложение для Android (Capacitor): модули доступны через Capacitor.Plugins, в браузере их нет
+const native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const plug = name => (native && window.Capacitor.Plugins && window.Capacitor.Plugins[name]) || null;
+
+// Закрепляем основную альбомную ориентацию: в приложении — нативно (кадр поворачивать не нужно),
+// в браузере на Android — через полноэкранный режим, если он поддерживает блокировку.
 async function lockScreen() {
+  const so = plug('ScreenOrientation');
+  if (so) { try { await so.lock({ orientation: 'landscape-primary' }); } catch (e) { } return; }
   const el = document.documentElement;
   try {
     if (!document.fullscreenElement && el.requestFullscreen) await el.requestFullscreen({ navigationUI: 'hide' });
-    await screen.orientation.lock(screen.orientation.type);
+    await screen.orientation.lock('landscape-primary');
   } catch (e) { }
 }
 
@@ -1038,7 +1127,9 @@ async function lockScreen() {
 function layout() {
   dpr = Math.min(window.devicePixelRatio || 1, 2);
   const vw = window.innerWidth, vh = window.innerHeight;
-  rot = touchDevice() ? ((gameAngle - screenAngle()) % 360 + 360) % 360 : 0;
+  pickGameAngle();
+  if (native) { gameAngle = screenAngle(); rot = 0; }
+  else rot = touchDevice() ? ((gameAngle - screenAngle()) % 360 + 360) % 360 : 0;
   const side = rot === 90 || rot === 270;
   sw = side ? vh : vw; sh = side ? vw : vh;
   root.style.width = sw + 'px'; root.style.height = sh + 'px';
@@ -1059,7 +1150,6 @@ function layout() {
   const land = sw > sh;
   if (wasLand !== null && land !== wasLand) motion.m0 = motion.z0 = null;
   wasLand = land;
-  refreshOrient();
 }
 
 // Левая/правая половина экрана; чем выше касание, тем сильнее струя.
@@ -1074,10 +1164,16 @@ function press(side, y, id, strong) {
   p.held = true; p.id = id; p.auto = 0; p.boost = 0;
   p.y = p.lastY = y == null ? 0 : y; p.lastT = performance.now();
   p.base = y == null ? (strong ? 1 : 0.65) : strengthFromY(y);
-  if (navigator.vibrate) try { navigator.vibrate(6 + Math.round(p.base * 24)); } catch (e) { }
+  const ms = 6 + Math.round(p.base * 24), hap = plug('Haptics');
+  if (hap) hap.vibrate({ duration: ms }).catch(() => { });
+  else if (navigator.vibrate) try { navigator.vibrate(ms); } catch (e) { }
+  bubbleSound(side, p.base);
   if (state === 'play') { game.presses++; if (tut.on) tut.presses[side]++; }
 }
-function release(side) { pumps[side].held = false; pumps[side].id = null; }
+function release(side) {
+  if (pumps[side].held) bubbleSound(side, 0.3, true);
+  pumps[side].held = false; pumps[side].id = null;
+}
 
 canvas.addEventListener('pointerdown', e => {
   e.preventDefault();
@@ -1110,7 +1206,8 @@ window.addEventListener('keydown', e => {
   if (e.code === 'Escape' || e.code === 'KeyP') { if (state === 'play') pauseGame(); else if (state === 'pause') resumeGame(); return; }
   // Без телефона: Q / E — наклон, пробел — стукнуть по аквариуму снизу
   if (e.code === 'KeyQ' || e.code === 'KeyE') { motion.keyTilt = e.code === 'KeyQ' ? -1 : 1; return; }
-  if (e.code === 'Space') { e.preventDefault(); shake.x = (Math.random() - 0.5) * 1600; shake.y = -4000; return; }
+  if (e.code === 'Space') { e.preventDefault(); shake.x = (Math.random() - 0.5) * 1600; shake.y = -4000;
+    if (state === 'play') { initAudio(); bubbleSound(0, 1); bubbleSound(1, 1); } return; }
   const s = KEYS[e.code];
   if (s === undefined || e.repeat || state !== 'play') return;
   initAudio();
@@ -1128,9 +1225,10 @@ function show(name) {
   for (const k in overlays) overlays[k].classList.toggle('hidden', k !== name);
   pauseBtn.classList.toggle('hidden', state !== 'play');
   if (name === 'menu') refreshBest();
+  audioScene();
 }
 function pauseGame() { if (state !== 'play') return; state = 'pause'; resetPumps(); show('pause'); }
-function resumeGame() { state = 'play'; show(null); }
+function resumeGame() { initAudio(); state = 'play'; show(null); }
 function toMenu() { state = 'menu'; resetFluid(); resetPumps(); rings = []; spawnRings(8, RING_D, false); show('menu'); }
 
 document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => startGame(b.dataset.mode)));
@@ -1166,30 +1264,38 @@ tiltBtn.addEventListener('click', () => {
   refreshTilt();
 });
 refreshTilt();
-document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); });
+function refreshSoundButtons() {
+  for (const [selector, label, on] of [['.musicBtn', 'Музыка', musicOn], ['.sfxBtn', 'Звуки', sfxOn]]) {
+    document.querySelectorAll(selector).forEach(b => {
+      b.textContent = `${label}: ${on ? 'вкл' : 'выкл'}`;
+      b.setAttribute('aria-pressed', String(on));
+    });
+  }
+}
+for (const [selector, key] of [['.musicBtn', 'rings_music'], ['.sfxBtn', 'rings_sfx']]) {
+  document.querySelectorAll(selector).forEach(b => b.addEventListener('click', () => {
+    initAudio();
+    if (key === 'rings_music') musicOn = !musicOn; else sfxOn = !sfxOn;
+    try { localStorage.setItem(key, (key === 'rings_music' ? musicOn : sfxOn) ? '1' : '0'); } catch (_) { }
+    if (!sfxOn) stopVoices(sfxBus);
+    refreshSoundButtons(); audioScene();
+  }));
+}
+refreshSoundButtons();
+document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); audioScene(); });
 
-// Поле альбомное или портретное. Кнопка меняет само поле (аквариум, штыри, сопла) и игровой кадр под него
-// На кнопке — куда повернуть: значок телефона в этом положении и одно слово
-function refreshOrient() {
-  const toPortrait = field === 'landscape', w = toPortrait ? 12 : 20, h = toPortrait ? 20 : 12;
-  const icon = `<svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true" style="vertical-align:-4px;margin-right:8px">
-    <rect x="${11 - w / 2}" y="${11 - h / 2}" width="${w}" height="${h}" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>`;
-  document.querySelectorAll('.orientBtn').forEach(b => { b.innerHTML = icon + (toPortrait ? 'Вертикально' : 'Горизонтально'); });
+// Кнопка «Назад» в приложении: в игре — пауза, на паузе — продолжить, после партии — в меню, в меню — свернуть
+const appPlug = plug('App');
+if (appPlug) {
+  appPlug.addListener('backButton', () => {
+    if (state === 'play') pauseGame();
+    else if (state === 'pause') resumeGame();
+    else if (state === 'over') toMenu();
+    else appPlug.minimizeApp();
+  });
+  appPlug.addListener('appStateChange', s => { if (!s.isActive) pauseGame(); });
 }
 
-function changeField(name) {
-  if (name === field) return;
-  setField(name);
-  for (const s of specks) { s.x = Math.random() * W; s.y = Math.random() * H; }
-  bubbles.length = 0; sparks.length = 0;
-  resetPumps(); resetMotion();
-  pickGameAngle(); layout();
-  try { localStorage.setItem('rings_field', name); } catch (e) { }
-  if (state === 'menu') { rings = []; spawnRings(8, RING_D, false); } else startGame(mode);
-}
-document.querySelectorAll('.orientBtn').forEach(b => b.addEventListener('click', () => {
-  changeField(field === 'landscape' ? 'portrait' : 'landscape');
-}));
 ['orientationchange', 'resize'].forEach(ev => window.addEventListener(ev, layout));
 if (window.screen && screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener('change', layout);
 
@@ -1357,7 +1463,7 @@ function drawHud() {
 // Зона насоса для подсказки: полоска посреди своей половины, снизу (слабо) вверх (сильно)
 function tutStripe(side) {
   const x = sw * (side ? 0.75 : 0.25);
-  return sh > sw ? { x, y0: sh * 0.93, y1: sh * 0.56 } : { x, y0: sh * 0.9, y1: sh * 0.2 };
+  return sh > sw ? { x, y0: sh * 0.93, y1: sh * 0.56 } : { x, y0: sh * 0.9, y1: Math.max(hudH + 62, sh * 0.25) };
 }
 
 function drawTutorial() {
@@ -1376,14 +1482,17 @@ function drawTutorial() {
     ctx.beginPath(); ctx.moveTo(x - 7, y1 + 15); ctx.lineTo(x, y1 + 8); ctx.lineTo(x + 7, y1 + 15); ctx.stroke();
   }
   ctx.globalAlpha = A * 0.95; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.font = '600 14px system-ui';
-  ctx.fillText('Нажимай · выше — сильнее', sw / 2, tutStripe(0).y1 - 18);
+  ctx.font = `800 ${Math.round(clamp(sw * 0.035, 22, 32))}px system-ui`;
+  ctx.strokeStyle = 'rgba(0,25,65,0.9)'; ctx.lineWidth = 5; ctx.lineJoin = 'round';
+  ctx.strokeText('Нажимай · выше — сильнее', sw / 2, tutStripe(0).y1 - 28);
+  ctx.fillText('Нажимай · выше — сильнее', sw / 2, tutStripe(0).y1 - 28);
   // Подписи шкалы у полоски: внизу слабо, наверху сильно
-  ctx.font = '500 12px system-ui'; ctx.globalAlpha = A * 0.8;
+  ctx.font = `800 ${Math.round(clamp(sh * 0.06, 20, 28))}px system-ui`; ctx.globalAlpha = A;
   for (let s = 0; s < 2; s++) {
-    const { x, y0, y1 } = tutStripe(s), lx = x + (s ? -26 : 26);
+    const { x, y0, y1 } = tutStripe(s), lx = x + (s ? -36 : 36);
     ctx.textAlign = s ? 'right' : 'left';
-    ctx.fillText('сильно', lx, y1 + 12); ctx.fillText('слабо', lx, y0 - 10);
+    ctx.strokeText('сильно', lx, y1 + 16); ctx.fillText('сильно', lx, y1 + 16);
+    ctx.strokeText('слабо', lx, y0 - 14); ctx.fillText('слабо', lx, y0 - 14);
   }
   // Палец не водит, а нажимает: три отдельных касания снизу вверх, каждое — появился, нажал, исчез.
   // Круг от нажатия тем больше, чем выше касание — струя сильнее. Потом то же на другой стороне
@@ -1410,16 +1519,17 @@ function frame(now) {
     acc += dt;
     while (acc >= STEP) { tick(STEP); acc -= STEP; }
   }
+  audioUpdate();
   render(now);
   requestAnimationFrame(frame);
 }
 
 pickGameAngle();
 layout();
+// В приложении ориентацию закрепляем сразу, без жеста игрока
+if (native) lockScreen();
 spawnRings(8, RING_D, false);
 show('menu');
-// По умолчанию поле альбомное; выбор игрока запоминаем
-try { if (localStorage.getItem('rings_field') === 'portrait') changeField('portrait'); } catch (e) { }
 requestAnimationFrame(frame);
 </script>
 </body>

@@ -1,11 +1,16 @@
-// Деплой на Cloudflare: npx wrangler deploy
-// Наружу уходит только index.html — всё остальное отсекает .assetsignore
+// Деплой на Cloudflare: npm run deploy
+// Публикуется только защищённый dist/index.html после сборки и проверок.
 {
   "name": "water-rings",
   "compatibility_date": "2026-10-23",
   // Без отдельных ссылок на каждую версию — открыта только текущая
   "preview_urls": false,
+  "workers_dev": true,
+  "routes": [{ "pattern": "rings.sekond.pl", "custom_domain": true }],
+  "build": {
+    "command": "npm run build && npm run verify"
+  },
   "assets": {
-    "directory": "."
+    "directory": "./dist"
   }
 }

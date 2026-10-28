@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Кольца</string>
+    <string name="title_activity_main">Кольца</string>
+    <string name="package_name">com.waterrings.game</string>
+    <string name="custom_url_scheme">com.waterrings.game</string>
+</resources>

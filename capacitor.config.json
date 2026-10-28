@@ -1,0 +1,8 @@
+{
+  "appId": "com.waterrings.game",
+  "appName": "Кольца",
+  "webDir": "dist",
+  "android": {
+    "backgroundColor": "#c2302e"
+  }
+}

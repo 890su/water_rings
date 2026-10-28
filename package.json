@@ -1,0 +1,26 @@
+{
+  "name": "water-rings",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Кольца — водная игра",
+  "type": "module",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "verify": "node tools/verify-release.mjs && node tools/verify-audio.mjs",
+    "android": "npm run build && npm run verify && npx cap sync android",
+    "android:open": "npm run android && npx cap open android",
+    "deploy": "npx wrangler deploy"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/screen-orientation": "^8.0.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
+    "terser": "^5.51.2",
+    "wrangler": "^4.154.0"
+  }
+}
