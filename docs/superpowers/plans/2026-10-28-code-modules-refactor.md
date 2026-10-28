@@ -42,7 +42,8 @@
 | `src/core/fluid.js` | `fluid` — массивы воды; `IX`, `setBnd`, `project`, `advect`, `vorticity`, `blockRect`, `pegWake`, `fluidStep`, `resetFluid`, `sample`, `allocFluid` | «Жидкость» |
 | `src/core/pumps.js` | `pumps`, `makePump`, `updatePump`, `inject`, `shelfShade`, `suck`, `resetPumps` | «Насосы», `resetPumps` |
 | `src/core/motion.js` | `grav`, `shake`, `motion`, `onMotion`, `enableMotion`, `resetMotion`, `swirl`, `updateMotion`, `screenAxes(x, y, z, angle)` | «Наклон и встряска» |
-| `src/core/rings.js` | `world` — `{ rings: [] }`, вся физика колец, `spawnRings`, `PALETTE`, `DUO`, хук `onThreaded` | «Кольца» |
+| `src/core/hooks.js` | `hooks = { onThreaded, onStart, onEnd }` — через них ядро без DOM сообщает браузерной части о событиях; по умолчанию пустые функции | новое |
+| `src/core/rings.js` | `world` — `{ rings: [] }`, вся физика колец, `spawnRings`, `PALETTE`, `DUO`, вызов `hooks.onThreaded` | «Кольца» |
 | `src/core/fx.js` | `bubbles`, `sparks`, `specks`, `burst`, `updateFx` | «Эффекты» |
 | `src/core/game.js` | `G` — `{ state, mode, game, toastText, toastT }`, `MODES`, `startGame` (без DOM), `spawnWave`, `gameLogic`, `endGame` (через хук), рекорды, `tut*`, `demo`, `tick` | «Режимы и игра», «Подсказка» (логика) |
 | `src/audio.js` | звук Codex дословно | «Звук» … «Конец звука» |
