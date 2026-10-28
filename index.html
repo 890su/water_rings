@@ -15,7 +15,8 @@
   #root{position:fixed;left:0;top:0;overflow:hidden;transform-origin:0 0}
   .overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
     justify-content:safe center;overflow-y:auto;touch-action:pan-y;
-    gap:10px;background:rgba(10,20,40,.62);text-align:center;padding:24px;box-sizing:border-box}
+    gap:10px;background:rgba(10,20,40,.62);text-align:center;padding:24px;box-sizing:border-box;
+    padding-left:calc(24px + var(--safe-l,0px));padding-right:calc(24px + var(--safe-r,0px))}
   .hidden{display:none!important}
   h1{margin:0;font-size:40px;letter-spacing:1px;text-shadow:0 3px 0 rgba(0,0,0,.25)}
   p{margin:0;max-width:340px;line-height:1.4;opacity:.92}
@@ -98,7 +99,7 @@
 const CELL = 12;
 const RIM = 5, RING_D = 34, PEG_R = 3.5, G = 220, K_PAR = 1.6, K_PERP = 5.5, MAXV = 800;
 // Насос набирает воду заметно быстрее, чем выдаёт её, — как у настоящей игрушки
-const JET = 744, JET_W0 = 34, JET_SPREAD = 0.24, DRAIN = 1.1, REFILL = 4, VORT = 5, FLUID_DAMP = 0.6;
+const JET = 744, JET_W0 = 34, JET_SPREAD = 0.24, DRAIN = 2.2, REFILL = 4, VORT = 5, FLUID_DAMP = 0.6;
 // Надетое кольцо трётся о штырь (сильнее, если висит с наклоном) — одиночное нажатие его не сбивает,
 // а серия сильных струй может поднять над верхушкой и скинуть. PEG_SHELTER — доля потока, что до него доходит
 const PEG_SHELTER = 1, PEG_FRICTION = 3, PEG_BIND = 1, PEG_DRAG = 2, PEG_TWIST = 0.3;
@@ -1054,7 +1055,7 @@ function setBest(m, v) { try { localStorage.setItem('rings_best_' + m, String(v)
 function refreshBest() {
   const c = getBest('classic'), k = getBest('colors'), w = getBest('waves');
   document.getElementById('best-classic').textContent = c == null ? 'Надень все 8 колец на скорость' : `Рекорд: ${c.toFixed(1)} с`;
-  document.getElementById('best-colors').textContent = k == null ? 'Каждый цвет — на свой штырь за 90 с' : `Рекорд: ${k.toFixed(1)} с в запасе`;
+  document.getElementById('best-colors').textContent = k == null ? 'Каждый цвет — на свой столбик за 90 с' : `Рекорд: ${k.toFixed(1)} с в запасе`;
   document.getElementById('best-waves').textContent = w == null ? 'Кольца всё меньше, а их всё больше' : `Рекорд: ${w} колец`;
 }
 
@@ -1083,6 +1084,7 @@ function tick(dt) {
 // ---------- Экран и управление ----------
 const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
 let sw = 0, sh = 0, dpr = 1, S = 1, tankX = 0, tankY = 0, tankW = 0, tankH = 0, hudH = 52, wide = false, wasLand = null;
+let safeL = 0, safeT = 0, safeR = 0, safeB = 0;
 const PAD = 8, GAUGE_W = 16;
 
 // ---------- Ориентация ----------
@@ -1138,14 +1140,20 @@ function layout() {
     : rot === 270 ? `translate(0,${vh}px) rotate(270deg)` : '';
   canvas.width = Math.round(sw * dpr); canvas.height = Math.round(sh * dpr);
   canvas.style.width = sw + 'px'; canvas.style.height = sh + 'px';
-  wide = (sw - (sh - 2 * PAD) * W / H) / 2 >= 72;
-  hudH = wide ? 0 : clamp(sh * 0.07, 48, 64);
-  const availW = sw - 2 * PAD, availH = sh - hudH - 2 * PAD;
+  // Вырез под камеру: приложение рисует весь экран, а счёт, колбы и аквариум держим вне выреза.
+  // Размеры выреза присылает Android (MainActivity), в браузере их нет
+  const si = (native && window.__safeInsets) || {};
+  safeL = si.l || 0; safeT = si.t || 0; safeR = si.r || 0; safeB = si.b || 0;
+  if (native) { root.style.setProperty('--safe-l', safeL + 'px'); root.style.setProperty('--safe-r', safeR + 'px'); }
+  const uw = sw - safeL - safeR, uh = sh - safeT - safeB;
+  wide = (uw - (uh - 2 * PAD) * W / H) / 2 >= 72;
+  hudH = wide ? 0 : clamp(uh * 0.07, 48, 64);
+  const availW = uw - 2 * PAD, availH = uh - hudH - 2 * PAD;
   S = Math.min(availW / W, availH / H);
   tankW = W * S; tankH = H * S;
-  tankX = (sw - tankW) / 2; tankY = hudH + (availH - tankH) / 2 + PAD;
-  pauseBtn.style.left = (wide ? sw - PAD - GAUGE_W - 10 - 44 : sw / 2 + 44) + 'px';
-  pauseBtn.style.top = (wide ? PAD : Math.max(2, (hudH - 44) / 2 + 2)) + 'px';
+  tankX = safeL + (uw - tankW) / 2; tankY = safeT + hudH + (availH - tankH) / 2 + PAD;
+  pauseBtn.style.left = (wide ? sw - safeR - PAD - GAUGE_W - 10 - 44 : safeL + uw / 2 + 44) + 'px';
+  pauseBtn.style.top = safeT + (wide ? PAD : Math.max(2, (hudH - 44) / 2 + 2)) + 'px';
   // Телефон повернули — наклон отсчитываем заново от нового положения
   const land = sw > sh;
   if (wasLand !== null && land !== wasLand) motion.m0 = motion.z0 = null;
@@ -1426,9 +1434,9 @@ function drawPump(p, x, y, w, h) {
 }
 
 function drawHud() {
-  const gh = wide ? 72 : hudH - 14, gy = wide ? PAD : 7;
-  drawPump(pumps[0], PAD, gy, GAUGE_W, gh);
-  drawPump(pumps[1], sw - PAD - GAUGE_W, gy, GAUGE_W, gh);
+  const gh = wide ? 72 : hudH - 14, gy = safeT + (wide ? PAD : 7), gl = safeL + PAD, gr = sw - safeR - PAD - GAUGE_W;
+  drawPump(pumps[0], gl, gy, GAUGE_W, gh);
+  drawPump(pumps[1], gr, gy, GAUGE_W, gh);
   let score;
   if (mode === 'colors') score = `${rings.filter(r => r.on === r.ci).length}/${rings.length}`;
   else if (mode === 'waves') score = `${game.score + rings.filter(r => r.on >= 0).length}`;
@@ -1439,7 +1447,7 @@ function drawHud() {
   ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff';
   if (wide) {
     // Ландшафт: слева режим, время и нажатия, справа счёт
-    const lx = tankX / 2, rx = sw - tankX / 2, y = gy + gh + 30;
+    const lx = (safeL + tankX) / 2, rx = (tankX + tankW + sw - safeR) / 2, y = gy + gh + 30;
     ctx.textAlign = 'center';
     ctx.font = '600 16px system-ui'; ctx.fillText(name, lx, y);
     ctx.font = '800 34px system-ui'; ctx.fillStyle = tcol; ctx.fillText(t, lx, y + 38); ctx.fillStyle = '#fff';
@@ -1448,7 +1456,7 @@ function drawHud() {
     ctx.fillText(taps, lx, y + 72); ctx.fillText('колец', rx, y + 72);
     ctx.globalAlpha = 1;
   } else {
-    const y = hudH / 2 + 3, xl = PAD + GAUGE_W + 8, xr = sw - PAD - GAUGE_W - 8;
+    const y = safeT + hudH / 2 + 3, xl = gl + GAUGE_W + 8, xr = gr - 8;
     ctx.textAlign = 'left';
     ctx.font = '600 15px system-ui'; ctx.fillText(name, xl, y - 8);
     ctx.font = '500 12px system-ui'; ctx.globalAlpha = 0.85; ctx.fillText(taps, xl, y + 10); ctx.globalAlpha = 1;
