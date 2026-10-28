@@ -10,6 +10,9 @@ import { G } from './core/state.js';
 import { PALETTE, DUO, world, makeRing, updateDepth, engaged, phiRest, zLim, spawnRings, integrateRing, collideStatic, holeHasPeg, flopRing, updateThread, SEG, segParams, pushRing, narrowRing, shiftZ, ringPair, collidePegs, physics, updateSpin, checkThreads } from './core/rings.js';
 import { actx, sfxBus, musicOn, sfxOn, audioVoices, MUSIC_STEP, MUSIC_NOTES, MUSIC_CHORDS, noteHz, soundRandom, initAudio, stopVoices, audioScene, audioTone, bubbleSound, soundCue, toggleSound, audioUpdate } from './audio.js';
 import { MODES, toast, startGame, tut, tutSeen, tutStart, tutUpdate, spawnWave, gameLogic, endGame, getBest, setBest, demoT, demo, tick } from './core/game.js';
+import { touchDevice, screenAngle, native, plug, lockScreen } from './platform.js';
+import { canvas, ctx, sw, sh, dpr, S, tankX, tankY, tankW, tankH, hudH, wide, safeL, safeT, safeR, safeB, PAD, GAUGE_W, root, gameAngle, rot, pickGameAngle, toRoot, layout, pauseBtn } from './view.js';
+import { strengthFromY, press, release, bindInput } from './input.js';
 
 setField(P.START_FIELD);
 initSpecks();
@@ -45,151 +48,17 @@ function refreshBest() {
 }
 
 // ---------- Экран и управление ----------
-const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
-let sw = 0, sh = 0, dpr = 1, S = 1, tankX = 0, tankY = 0, tankW = 0, tankH = 0, hudH = 52, wide = false, wasLand = null;
-let safeL = 0, safeT = 0, safeR = 0, safeB = 0;
-const PAD = 8, GAUGE_W = 16;
 
 // ---------- Ориентация ----------
-// gameAngle — как стоит игровой кадр относительно «родной» ориентации устройства (в смысле screen.orientation.angle).
-// Всегда основная альбомная ориентация, без переключения поля.
-// низ остаётся у того же края корпуса. Если браузер сам повернул экран, кадр поворачиваем обратно на rot.
-// На компьютере (без касаний) не поворачиваем ничего
-const root = document.getElementById('root');
-let gameAngle = 0, rot = 0;
-// Телефон или планшет — основной ввод пальцем. Сенсорный ноутбук или встроенный браузер с касаниями сюда не попадают
-const touchDevice = () => !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
-function screenAngle() {
-  const o = window.screen && window.screen.orientation;
-  return (((o ? o.angle : window.orientation) || 0) % 360 + 360) % 360;
-}
-function pickGameAngle() {
-  const a = screenAngle(), natLand = a % 180 === 0 ? window.innerWidth > window.innerHeight : window.innerWidth <= window.innerHeight;
-  gameAngle = natLand ? 0 : 90;
-}
-// Координаты касания из окна браузера — в игровой кадр
-function toRoot(e) {
-  const vw = window.innerWidth, vh = window.innerHeight, x = e.clientX, y = e.clientY;
-  return rot === 90 ? [y, vw - x] : rot === 180 ? [vw - x, vh - y] : rot === 270 ? [vh - y, x] : [x, y];
-}
-// Приложение для Android (Capacitor): модули доступны через Capacitor.Plugins, в браузере их нет
-const native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
-const plug = name => (native && window.Capacitor.Plugins && window.Capacitor.Plugins[name]) || null;
 
-// Закрепляем основную альбомную ориентацию: в приложении — нативно (кадр поворачивать не нужно),
-// в браузере на Android — через полноэкранный режим, если он поддерживает блокировку.
-async function lockScreen() {
-  const so = plug('ScreenOrientation');
-  if (so) { try { await so.lock({ orientation: 'landscape-primary' }); } catch (e) { } return; }
-  const el = document.documentElement;
-  try {
-    if (!document.fullscreenElement && el.requestFullscreen) await el.requestFullscreen({ navigationUI: 'hide' });
-    await screen.orientation.lock('landscape-primary');
-  } catch (e) { }
-}
 
-// В портрете сверху полоса со счётом; в ландшафте аквариум во всю высоту, а счёт — по бокам от него
-function layout() {
-  dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const vw = window.innerWidth, vh = window.innerHeight;
-  pickGameAngle();
-  if (native) { gameAngle = screenAngle(); rot = 0; }
-  else rot = touchDevice() ? ((gameAngle - screenAngle()) % 360 + 360) % 360 : 0;
-  const side = rot === 90 || rot === 270;
-  sw = side ? vh : vw; sh = side ? vw : vh;
-  root.style.width = sw + 'px'; root.style.height = sh + 'px';
-  root.classList.toggle('short', sh < 520);
-  root.style.transform = rot === 90 ? `translate(${vw}px,0) rotate(90deg)` : rot === 180 ? `translate(${vw}px,${vh}px) rotate(180deg)`
-    : rot === 270 ? `translate(0,${vh}px) rotate(270deg)` : '';
-  canvas.width = Math.round(sw * dpr); canvas.height = Math.round(sh * dpr);
-  canvas.style.width = sw + 'px'; canvas.style.height = sh + 'px';
-  // Вырез под камеру: приложение рисует весь экран, а счёт, колбы и аквариум держим вне выреза.
-  // Размеры выреза присылает Android (MainActivity), в браузере их нет
-  const si = (native && window.__safeInsets) || {};
-  safeL = si.l || 0; safeT = si.t || 0; safeR = si.r || 0; safeB = si.b || 0;
-  if (native) { root.style.setProperty('--safe-l', safeL + 'px'); root.style.setProperty('--safe-r', safeR + 'px'); }
-  const uw = sw - safeL - safeR, uh = sh - safeT - safeB;
-  wide = (uw - (uh - 2 * PAD) * W / H) / 2 >= 72;
-  hudH = wide ? 0 : clamp(uh * 0.07, 48, 64);
-  const availW = uw - 2 * PAD, availH = uh - hudH - 2 * PAD;
-  S = Math.min(availW / W, availH / H);
-  tankW = W * S; tankH = H * S;
-  tankX = safeL + (uw - tankW) / 2; tankY = safeT + hudH + (availH - tankH) / 2 + PAD;
-  pauseBtn.style.left = (wide ? sw - safeR - PAD - GAUGE_W - 10 - 44 : safeL + uw / 2 + 44) + 'px';
-  pauseBtn.style.top = safeT + (wide ? PAD : Math.max(2, (hudH - 44) / 2 + 2)) + 'px';
-  // Телефон повернули — наклон отсчитываем заново от нового положения
-  const land = sw > sh;
-  if (wasLand !== null && land !== wasLand) motion.m0 = motion.z0 = null;
-  wasLand = land;
-}
 
-// Левая/правая половина экрана; чем выше касание, тем сильнее струя. Шкала силы — вся высота кадра.
-function strengthFromY(y) {
-  return 0.18 + 0.82 * clamp((sh - y) / sh, 0, 1);
-}
 
-function press(side, y, id, strong) {
-  const p = pumps[side];
-  p.held = true; p.id = id; p.auto = 0; p.boost = 0;
-  p.y = p.lastY = y == null ? 0 : y; p.lastT = performance.now();
-  p.base = y == null ? (strong ? 1 : 0.65) : strengthFromY(y);
-  const ms = 6 + Math.round(p.base * 24), hap = plug('Haptics');
-  if (hap) hap.vibrate({ duration: ms }).catch(() => { });
-  else if (navigator.vibrate) try { navigator.vibrate(ms); } catch (e) { }
-  bubbleSound(side, p.base);
-  if (G.state === 'play') { G.game.presses++; if (tut.on) tut.presses[side]++; }
-}
-function release(side) {
-  if (pumps[side].held) bubbleSound(side, 0.3, true);
-  pumps[side].held = false; pumps[side].id = null;
-}
 
-canvas.addEventListener('pointerdown', e => {
-  e.preventDefault();
-  initAudio();
-  const [x, y] = toRoot(e);
-  if (G.state !== 'play') return;
-  press(x < sw / 2 ? 0 : 1, y, e.pointerId);
-  try { canvas.setPointerCapture(e.pointerId); } catch (_) { }
-}, { passive: false });
-
-canvas.addEventListener('pointermove', e => {
-  for (let s = 0; s < 2; s++) {
-    const p = pumps[s];
-    if (!p.held || p.id !== e.pointerId) continue;
-    const y = toRoot(e)[1], now = performance.now(), vy = (y - p.lastY) / Math.max(1, now - p.lastT) * 1000;
-    if (vy < -400) p.boost = Math.min(0.4, Math.max(p.boost, (-vy - 400) / 2500));
-    p.y = p.lastY = y; p.lastT = now;
-    p.base = strengthFromY(y);
-  }
-});
-const endPointer = e => { for (let s = 0; s < 2; s++) if (pumps[s].id === e.pointerId) release(s); };
-canvas.addEventListener('pointerup', endPointer);
-canvas.addEventListener('pointercancel', endPointer);
-canvas.addEventListener('lostpointercapture', endPointer);
-canvas.addEventListener('contextmenu', e => e.preventDefault());
-document.addEventListener('gesturestart', e => e.preventDefault());
-
-const KEYS = { KeyA: 0, ArrowLeft: 0, KeyL: 1, ArrowRight: 1 };
-window.addEventListener('keydown', e => {
-  if (e.code === 'Escape' || e.code === 'KeyP') { if (G.state === 'play') pauseGame(); else if (G.state === 'pause') resumeGame(); return; }
-  // Без телефона: Q / E — наклон, пробел — стукнуть по аквариуму снизу
-  if (e.code === 'KeyQ' || e.code === 'KeyE') { motion.keyTilt = e.code === 'KeyQ' ? -1 : 1; return; }
-  if (e.code === 'Space') { e.preventDefault(); shake.x = (Math.random() - 0.5) * 1600; shake.y = -4000;
-    if (G.state === 'play') { initAudio(); bubbleSound(0, 1); bubbleSound(1, 1); } return; }
-  const s = KEYS[e.code];
-  if (s === undefined || e.repeat || G.state !== 'play') return;
-  initAudio();
-  press(s, null, 'key', e.shiftKey);
-});
-window.addEventListener('keyup', e => {
-  if ((e.code === 'KeyQ' && motion.keyTilt < 0) || (e.code === 'KeyE' && motion.keyTilt > 0)) motion.keyTilt = 0;
-  const s = KEYS[e.code]; if (s !== undefined && pumps[s].id === 'key') release(s);
-});
+bindInput({ pause: () => pauseGame(), resume: () => resumeGame() });
 
 // ---------- Меню ----------
 const overlays = { menu: document.getElementById('menu'), pause: document.getElementById('pause'), result: document.getElementById('result') };
-const pauseBtn = document.getElementById('pauseBtn');
 function show(name) {
   for (const k in overlays) overlays[k].classList.toggle('hidden', k !== name);
   pauseBtn.classList.toggle('hidden', G.state !== 'play');
