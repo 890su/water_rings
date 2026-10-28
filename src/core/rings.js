@@ -34,7 +34,7 @@ export function updateDepth(R) {
   R.zWall = Math.max(0, P.TANK_Z - R.hz);
   R.zHole = Math.max(0, c - P.RIM - P.PEG_R);
 }
-export const engaged = R => R.on >= 0 || R.eng[0] || R.eng[1];
+export const engaged = R => R.on >= 0 || R.eng.some(e => e);
 // Наклон «плашмя» к зрителю: при наклоне телефона на себя / от себя кольца ложатся плашмя к новому «низу»
 export const phiRest = () => P.SPIN_REST - Math.atan2(grav.z, Math.max(0.1, Math.hypot(grav.x, grav.y)));
 export const zLim = R => engaged(R) ? R.zHole : R.zWall;

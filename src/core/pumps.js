@@ -4,7 +4,14 @@ import { W, H, NX, NY, SX, NCELLS, PEG_TIP, PEG_BOTTOM, JET_LEN, pegs, nozzles, 
 import { u, v, IX, sample } from './fluid.js';
 
 export function makePump() { return { held: false, id: null, y: 0, lastY: 0, lastT: 0, base: 0, boost: 0, flow: 0, stroke: 1, emit: 0, auto: 0 }; }
-export const pumps = [makePump(), makePump()];
+// По насосу на каждое сопло поля — список подстраивает setField
+export const pumps = [];
+export function syncPumps() {
+  while (pumps.length < nozzles.length) pumps.push(makePump());
+  pumps.length = nozzles.length;
+}
+// Какой насос включает касание в точке x кадра шириной width: экран делится на равные зоны слева направо
+export function pumpAt(x, width) { return Math.min(pumps.length - 1, Math.max(0, Math.floor(x / width * pumps.length))); }
 
 export function updatePump(p, dt) {
   if (p.auto > 0) { p.auto -= dt; if (p.auto <= 0) p.held = false; }

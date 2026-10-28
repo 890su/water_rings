@@ -107,7 +107,7 @@ export function audioUpdate() {
       nextMusic += MUSIC_STEP; musicStep++;
     }
   }
-  if (G.state === 'play' && sfxOn) for (let side = 0; side < 2; side++) {
+  if (G.state === 'play' && sfxOn) for (let side = 0; side < pumps.length; side++) {
     const p = pumps[side];
     if (p.held && p.flow > 0.08 && t >= nextBubble[side]) bubbleSound(side, p.flow, true);
   }

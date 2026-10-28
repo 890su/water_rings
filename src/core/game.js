@@ -42,11 +42,11 @@ export function startGame(m) {
 // done — на случай, если хранилище недоступно (приватный режим): тогда хотя бы до перезагрузки не повторяем
 export const tut = { on: false, a: 0, t: 0, presses: [0, 0], force: false, done: false };
 export function tutSeen() { try { return tut.done || localStorage.getItem('rings_tut') === '1'; } catch (e) { return tut.done; } }
-export function tutStart() { Object.assign(tut, { on: true, a: 0, t: 0, presses: [0, 0], force: false }); }
+export function tutStart() { Object.assign(tut, { on: true, a: 0, t: 0, presses: pumps.map(() => 0), force: false }); }
 export function tutUpdate(dt) {
   if (!tut.on) return;
   tut.t += dt;
-  const done = tut.presses[0] >= 2 && tut.presses[1] >= 2;
+  const done = tut.presses.every(n => n >= 2);
   tut.a = clamp(tut.a + (done ? -dt / 0.6 : dt / 0.5), 0, 1);
   if (done && tut.a <= 0) { tut.on = false; tut.done = true; try { localStorage.setItem('rings_tut', '1'); } catch (e) { } }
 }
@@ -116,7 +116,7 @@ export let demoT = 1;
 export function demo(dt) {
   demoT -= dt;
   if (demoT > 0) return;
-  const p = pumps[Math.random() < 0.5 ? 0 : 1];
+  const p = pumps[Math.floor(Math.random() * pumps.length)];
   if (!p.held) { p.held = true; p.base = 0.45 + Math.random() * 0.55; p.auto = 0.2 + Math.random() * 0.5; }
   demoT = 0.6 + Math.random() * 1.6;
 }
@@ -124,8 +124,8 @@ export function demo(dt) {
 export function tick(dt) {
   if (G.state === 'menu') demo(dt);
   updateMotion(dt);
-  updatePump(pumps[0], dt); updatePump(pumps[1], dt);
-  inject(0); inject(1);
+  for (const p of pumps) updatePump(p, dt);
+  for (let i = 0; i < pumps.length; i++) inject(i);
   fluidStep(dt);
   for (let i = 0; i < P.SUB; i++) physics(dt / P.SUB);
   checkThreads(dt);

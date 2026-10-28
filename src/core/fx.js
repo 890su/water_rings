@@ -19,7 +19,7 @@ export function burst(x, y, col, n) {
 }
 
 export function updateFx(dt) {
-  for (let s = 0; s < 2; s++) {
+  for (let s = 0; s < pumps.length; s++) {
     const p = pumps[s], n = nozzles[s];
     p.emit += p.flow * 80 * dt;
     while (p.emit >= 1) {

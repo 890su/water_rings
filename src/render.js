@@ -85,7 +85,7 @@ export function render(now) {
     ctx.fillStyle = pg; rr(g.x - P.PEG_R, g.tip - P.PEG_R, P.PEG_R * 2, g.bottom - g.tip + P.PEG_R, P.PEG_R); ctx.fill();
     ctx.fillStyle = '#dfe6ef'; rr(g.x - P.SHELF_W / 2, g.bottom - 3, P.SHELF_W, 7, 3.5); ctx.fill();
     ctx.fillStyle = 'rgba(0,0,0,0.15)'; rr(g.x - P.SHELF_W / 2, g.bottom + 1, P.SHELF_W, 3, 1.5); ctx.fill();
-    if (G.mode === 'colors' && G.state !== 'menu') {
+    if (G.mode === 'colors' && G.state !== 'menu' && DUO[k]) {
       ctx.beginPath(); ctx.arc(g.x, g.tip, P.PEG_R + 2.5, 0, Math.PI * 2); ctx.fillStyle = DUO[k]; ctx.fill();
     }
   }
@@ -139,7 +139,7 @@ export function drawPump(p, x, y, w, h) {
 export function drawHud() {
   const gh = wide ? 72 : hudH - 14, gy = safeT + (wide ? PAD : 7), gl = safeL + PAD, gr = sw - safeR - PAD - GAUGE_W;
   drawPump(pumps[0], gl, gy, GAUGE_W, gh);
-  drawPump(pumps[1], gr, gy, GAUGE_W, gh);
+  drawPump(pumps[pumps.length - 1], gr, gy, GAUGE_W, gh);
   let score;
   if (G.mode === 'colors') score = `${world.rings.filter(r => r.on === r.ci).length}/${world.rings.length}`;
   else if (G.mode === 'waves') score = `${G.game.score + world.rings.filter(r => r.on >= 0).length}`;
@@ -169,9 +169,9 @@ export function drawHud() {
   ctx.textBaseline = 'alphabetic';
 }
 
-// Зона насоса для подсказки: полоска посреди своей половины, снизу (слабо) вверх (сильно)
+// Зона насоса для подсказки: полоска посреди своей зоны экрана, снизу (слабо) вверх (сильно)
 export function tutStripe(side) {
-  const x = sw * (side ? 0.75 : 0.25);
+  const x = sw * (side + 0.5) / pumps.length;
   return { x, y0: sh * 0.9, y1: Math.max(hudH + 62, sh * 0.25) };
 }
 
@@ -180,7 +180,7 @@ export function drawTutorial() {
   if (A <= 0) return;
   ctx.save();
   ctx.shadowColor = 'rgba(0,30,70,0.5)'; ctx.shadowBlur = 6;
-  for (let s = 0; s < 2; s++) {
+  for (let s = 0; s < pumps.length; s++) {
     const { x, y0, y1 } = tutStripe(s), w = 26;
     const gr = ctx.createLinearGradient(0, y0, 0, y1);
     gr.addColorStop(0, 'rgba(255,255,255,0.04)'); gr.addColorStop(1, 'rgba(255,255,255,0.26)');
@@ -197,7 +197,7 @@ export function drawTutorial() {
   ctx.fillText('Нажимай · выше — сильнее', sw / 2, tutStripe(0).y1 - 28);
   // Подписи шкалы у полоски: внизу слабо, наверху сильно
   ctx.font = `800 ${Math.round(clamp(sh * 0.06, 20, 28))}px system-ui`; ctx.globalAlpha = A;
-  for (let s = 0; s < 2; s++) {
+  for (let s = 0; s < pumps.length; s++) {
     const { x, y0, y1 } = tutStripe(s), lx = x + (s ? -36 : 36);
     ctx.textAlign = s ? 'right' : 'left';
     ctx.strokeText('сильно', lx, y1 + 16); ctx.fillText('сильно', lx, y1 + 16);
@@ -205,7 +205,7 @@ export function drawTutorial() {
   }
   // Палец не водит, а нажимает: три отдельных касания снизу вверх, каждое — появился, нажал, исчез.
   // Круг от нажатия тем больше, чем выше касание — струя сильнее. Потом то же на другой стороне
-  const TAP = 0.8, side = Math.floor(tut.t / (3 * TAP)) % 2, n = Math.floor(tut.t / TAP) % 3, q = (tut.t % TAP) / TAP;
+  const TAP = 0.8, side = Math.floor(tut.t / (3 * TAP)) % pumps.length, n = Math.floor(tut.t / TAP) % 3, q = (tut.t % TAP) / TAP;
   const { x, y0, y1 } = tutStripe(side), f = [0.12, 0.5, 0.88][n], y = y0 + (y1 - y0) * f;
   const vis = q < 0.18 ? q / 0.18 : q > 0.72 ? Math.max(0, (0.95 - q) / 0.23) : 1;
   const down = clamp((q - 0.18) / 0.1, 0, 1);

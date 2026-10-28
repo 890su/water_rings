@@ -1,7 +1,7 @@
 // Ввод: касания и мышь (насос — по половине экрана, сила — по высоте), клавиатура.
 import { P } from './core/params.js';
 import { clamp } from './core/field.js';
-import { pumps } from './core/pumps.js';
+import { pumps, pumpAt } from './core/pumps.js';
 import { shake, motion } from './core/motion.js';
 import { G } from './core/state.js';
 import { tut } from './core/game.js';
@@ -35,12 +35,12 @@ export function bindInput(ui) {
     initAudio();
     const [x, y] = toRoot(e);
     if (G.state !== 'play') return;
-    press(x < sw / 2 ? 0 : 1, y, e.pointerId);
+    press(pumpAt(x, sw), y, e.pointerId);
     try { canvas.setPointerCapture(e.pointerId); } catch (_) { }
   }, { passive: false });
 
   canvas.addEventListener('pointermove', e => {
-    for (let s = 0; s < 2; s++) {
+    for (let s = 0; s < pumps.length; s++) {
       const p = pumps[s];
       if (!p.held || p.id !== e.pointerId) continue;
       const y = toRoot(e)[1], now = performance.now(), vy = (y - p.lastY) / Math.max(1, now - p.lastT) * 1000;
@@ -49,27 +49,29 @@ export function bindInput(ui) {
       p.base = strengthFromY(y);
     }
   });
-  const endPointer = e => { for (let s = 0; s < 2; s++) if (pumps[s].id === e.pointerId) release(s); };
+  const endPointer = e => { for (let s = 0; s < pumps.length; s++) if (pumps[s].id === e.pointerId) release(s); };
   canvas.addEventListener('pointerup', endPointer);
   canvas.addEventListener('pointercancel', endPointer);
   canvas.addEventListener('lostpointercapture', endPointer);
   canvas.addEventListener('contextmenu', e => e.preventDefault());
   document.addEventListener('gesturestart', e => e.preventDefault());
 
-  const KEYS = { KeyA: 0, ArrowLeft: 0, KeyL: 1, ArrowRight: 1 };
+  // Левые клавиши — первый насос, правые — последний
+  const KEYS = { KeyA: 0, ArrowLeft: 0, KeyL: -1, ArrowRight: -1 };
+  const keyPump = code => { const s = KEYS[code]; return s === undefined ? undefined : s < 0 ? pumps.length - 1 : s; };
   window.addEventListener('keydown', e => {
     if (e.code === 'Escape' || e.code === 'KeyP') { if (G.state === 'play') ui.pause(); else if (G.state === 'pause') ui.resume(); return; }
     // Без телефона: Q / E — наклон, пробел — стукнуть по аквариуму снизу
     if (e.code === 'KeyQ' || e.code === 'KeyE') { motion.keyTilt = e.code === 'KeyQ' ? -1 : 1; return; }
     if (e.code === 'Space') { e.preventDefault(); shake.x = (Math.random() - 0.5) * 1600; shake.y = -4000;
       if (G.state === 'play') { initAudio(); bubbleSound(0, 1); bubbleSound(1, 1); } return; }
-    const s = KEYS[e.code];
+    const s = keyPump(e.code);
     if (s === undefined || e.repeat || G.state !== 'play') return;
     initAudio();
     press(s, null, 'key', e.shiftKey);
   });
   window.addEventListener('keyup', e => {
     if ((e.code === 'KeyQ' && motion.keyTilt < 0) || (e.code === 'KeyE' && motion.keyTilt > 0)) motion.keyTilt = 0;
-    const s = KEYS[e.code]; if (s !== undefined && pumps[s].id === 'key') release(s);
+    const s = keyPump(e.code); if (s !== undefined && pumps[s].id === 'key') release(s);
   });
 }
