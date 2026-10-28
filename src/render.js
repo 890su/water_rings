@@ -9,8 +9,10 @@ import { G } from './core/state.js';
 import { ctx, sw, sh, dpr, S, tankX, tankY, tankW, tankH, hudH, wide, safeL, safeT, safeR, PAD, GAUGE_W } from './view.js';
 
 
+// Скруглённый прямоугольник. На крошечном окне размеры бывают отрицательными (полоска подсказки
+// выше своего низа) — радиус не меньше нуля, иначе arcTo бросает исключение и игра замирает
 export function rr(x, y, w, h, r) {
-  r = Math.min(r, w / 2, h / 2);
+  r = Math.max(0, Math.min(r, w / 2, h / 2));
   ctx.beginPath();
   ctx.moveTo(x + r, y);
   ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);

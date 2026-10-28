@@ -25,7 +25,8 @@ export function stateOf({ ui, storage }) {
   return createHash('sha256').update(JSON.stringify(canon([[...ui].sort(byKey), [...storage].sort(byKey)]))).digest('hex');
 }
 
-export function play(code, { mode, portrait = false, mobile = false, long = false, seconds = 30, press }, probe) {
+// shrink — посреди партии окно сжимается до нуля (свёрнутая панель) и разворачивается обратно
+export function play(code, { mode, portrait = false, mobile = false, long = false, seconds = 30, press, shrink = false }, probe) {
   let seed = 123456789, now = 0, raf, calls = 0;
   const hash = createHash('sha256');
   const record = (...args) => { hash.update(JSON.stringify(args)); calls++; };
@@ -33,6 +34,8 @@ export function play(code, { mode, portrait = false, mobile = false, long = fals
   const ctx = new Proxy({}, {
     get: (obj, key) => key in obj ? obj[key] : (...args) => {
       record(key, ...args);
+      // Как в браузере: отрицательный радиус дуги — исключение IndexSizeError
+      if ((key === 'arcTo' && args[4] < 0) || (key === 'arc' && args[2] < 0)) throw new RangeError(`${key}: negative radius ${args[key === 'arc' ? 2 : 4]}`);
       if (String(key).startsWith('create')) return gradient;
       if (key === 'measureText') return { width: String(args[0]).length * 8 };
     },
@@ -113,6 +116,11 @@ export function play(code, { mode, portrait = false, mobile = false, long = fals
   window.fire('keyup', { code: 'KeyQ' });
   window.fire('keydown', { code: 'Space' });
   frames(12);
+  if (shrink) {
+    const was = [window.innerWidth, window.innerHeight];
+    window.innerWidth = window.innerHeight = 0; window.fire('resize'); frames(3);
+    [window.innerWidth, window.innerHeight] = was; window.fire('resize'); frames(3);
+  }
   el('pauseBtn').fire('click'); frames(3);
   el('music-pause').fire('click'); el('sfx-pause').fire('click');
   el('resumeBtn').fire('click'); frames(3);

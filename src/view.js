@@ -47,7 +47,9 @@ export function layout() {
   wide = (uw - (uh - 2 * PAD) * W / H) / 2 >= 72;
   hudH = wide ? 0 : clamp(uh * 0.07, 48, 64);
   const availW = uw - 2 * PAD, availH = uh - hudH - 2 * PAD;
-  S = Math.min(availW / W, availH / H);
+  // Окно меньше отступов (свёрнутая панель, 0×0) — аквариум просто не виден; отрицательный масштаб
+  // вывернул бы рамку наизнанку, и отрисовка упала бы на отрицательном радиусе
+  S = Math.max(0, Math.min(availW / W, availH / H));
   tankW = W * S; tankH = H * S;
   tankX = safeL + (uw - tankW) / 2; tankY = safeT + hudH + (availH - tankH) / 2 + PAD;
   pauseBtn.style.left = (wide ? sw - safeR - PAD - GAUGE_W - 10 - 44 : safeL + uw / 2 + 44) + 'px';
