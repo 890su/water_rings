@@ -5,8 +5,8 @@ import { readFileSync } from 'node:fs';
 const [games = 20, maxSec = 600, overridesArg = ''] = process.argv.slice(2);
 const overrides = Object.fromEntries(overridesArg.split(',').filter(Boolean).map(s => s.split('=')));
 
-let src = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-src = src.slice(src.indexOf('<script>') + 8, src.lastIndexOf('</script>'));
+let src = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+// до перевода ботов на импорт ядра (задача 6) — исходник целиком
 for (const [k, v] of Object.entries(overrides)) {
   const re = new RegExp(`\\b${k} = [^,;\\n]+`);
   if (!re.test(src)) throw new Error('no constant ' + k);

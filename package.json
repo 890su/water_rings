@@ -11,7 +11,8 @@
     "android:open": "npm run android && npx cap open android",
     "deploy": "npx wrangler deploy",
     "test": "node --test \"tests/**/*.test.mjs\"",
-    "golden:record": "node tools/golden-record.mjs"
+    "golden:record": "node tools/golden-record.mjs",
+    "dev": "node tools/build.mjs --watch --serve"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.3",
@@ -22,6 +23,7 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.3",
+    "esbuild": "^0.28.2",
     "terser": "^5.51.2",
     "wrangler": "^4.154.0"
   }

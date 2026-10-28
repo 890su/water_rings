@@ -5,7 +5,7 @@ import { play, scriptOf as script, SCENARIOS } from '../tests/harness.mjs';
 import assert from 'node:assert/strict';
 
 const root = new URL('../', import.meta.url);
-const source = await readFile(new URL('index.html', root), 'utf8');
+const source = await readFile(new URL('build/index.dev.html', root), 'utf8');
 const release = await readFile(new URL('dist/index.html', root), 'utf8');
 assert.equal(source.replace(/<script>[\s\S]*?<\/script>/, ''), release.replace(/<script>[\s\S]*?<\/script>/, ''));
 assert.ok(!/sourceMappingURL|sourceURL/.test(script(release)));

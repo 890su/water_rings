@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import assert from 'node:assert/strict';
 
-const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+const html = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const engine = html.split('// ---------- Звук ----------')[1].split('// ---------- Конец звука ----------')[0];
 let clock = 0, starts = 0, suspends = 0;
 const oscillators = new Set();
