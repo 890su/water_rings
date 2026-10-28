@@ -58,7 +58,7 @@ export function integrateRing(R, dt) {
   let tx = R.b.x - R.a.x, ty = R.b.y - R.a.y;
   const L = Math.hypot(tx, ty) || 1; tx /= L; ty /= L;
   const ePar = Math.exp(-P.K_PAR * dt), ePerp = Math.exp(-P.K_PERP * dt);
-  const onPeg = R.on >= 0, shelter = onPeg ? PEG_SHELTER : 1;
+  const onPeg = R.on >= 0, shelter = onPeg ? P.PEG_SHELTER : 1;
   // Надетое кольцо выравниваться не стремится, а висит на штыре с наклоном —
   // и чем сильнее наклонено (в плоскости или к зрителю), тем сильнее закусывает стержень
   let rub = 1;
@@ -68,7 +68,7 @@ export function integrateRing(R, dt) {
   }
   // Кольцо выравнивается поперёк силы тяжести — при наклоне телефона ложится по новому «низу».
   // Надетое — лишь слегка: иначе висит ребром к струе, и вода не может поднять его со штыря
-  const level = (onPeg && !R.support && !R.ground ? PEG_ALIGN : 1) * ((R.a.x - R.b.x) * grav.x + (R.a.y - R.b.y) * grav.y) * P.ALIGN * dt;
+  const level = (onPeg && !R.support && !R.ground ? P.PEG_ALIGN : 1) * ((R.a.x - R.b.x) * grav.x + (R.a.y - R.b.y) * grav.y) * P.ALIGN * dt;
   for (let n = 0; n < 2; n++) {
     const p = n ? R.b : R.a, lv = n ? level : -level;
     let vx = (p.x - p.px) / dt + lv * grav.x, vy = (p.y - p.py) / dt;

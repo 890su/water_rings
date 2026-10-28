@@ -51,7 +51,8 @@ export function onMotion(e) {
 }
 
 export function enableMotion() {
-  if (motion.listening || !window.DeviceMotionEvent) return;
+  // Без браузера (тесты, боты) датчиков нет
+  if (motion.listening || typeof window === 'undefined' || !window.DeviceMotionEvent) return;
   motion.listening = true;
   const listen = () => window.addEventListener('devicemotion', onMotion);
   if (typeof DeviceMotionEvent.requestPermission === 'function') {

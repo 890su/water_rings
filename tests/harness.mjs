@@ -13,7 +13,7 @@ for (const mode of ['classic', 'colors', 'waves']) {
   SCENARIOS.push({ name: `${mode}, long 30 s`, mode, long: true });
 }
 
-export function play(code, { mode, portrait = false, mobile = false, long = false }) {
+export function play(code, { mode, portrait = false, mobile = false, long = false, seconds = 30, press }, probe) {
   let seed = 123456789, now = 0, raf, calls = 0;
   const hash = createHash('sha256');
   const record = (...args) => { hash.update(JSON.stringify(args)); calls++; };
@@ -69,17 +69,20 @@ export function play(code, { mode, portrait = false, mobile = false, long = fals
   frames(3);
   el(mode).fire('click');
   if (long) {
-    // 30 с: насосы по очереди, каждые 40 кадров нажатие на 25 кадров, высота касания 0,25 / 0,6 / 0,9 высоты окна
-    const heights = [0.25, 0.6, 0.9];
-    for (let f = 0, k = 0; f < 1800; f++) {
-      if (f % 40 === 0) {
-        const side = k % 2, h = heights[k % 3];
+    // Длинная партия: каждые period кадров нажатие на hold кадров; насос и высота касания (доля высоты окна) — по кругу.
+    // По умолчанию: насосы по очереди, каждые 40 кадров на 25 кадров, высота 0,25 / 0,6 / 0,9
+    const { period = 40, hold = 25, heights = [0.25, 0.6, 0.9], sides = [0, 1] } = press ?? {};
+    for (let f = 0, k = 0; f < seconds * 60; f++) {
+      if (f % period === 0) {
+        const side = sides[k % sides.length], h = heights[k % heights.length];
         el('c').fire('pointerdown', { pointerId: 9, clientX: side ? window.innerWidth - 60 : 60, clientY: window.innerHeight * (1 - h) });
         k++;
       }
-      if (f % 40 === 25) el('c').fire('pointerup', { pointerId: 9 });
+      if (f % period === hold) el('c').fire('pointerup', { pointerId: 9 });
       frames(1);
     }
+    // probe — выражение, вычисляемое в песочнице после партии (для исследования исходной версии; эталоны его не используют)
+    if (probe) return { hash: hash.digest('hex'), calls, probe: runInContext(probe, sandbox) };
     return { hash: hash.digest('hex'), calls };
   }
   el('c').fire('pointerdown', { pointerId: 1, clientX: 60, clientY: 740 });
