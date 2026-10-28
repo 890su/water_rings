@@ -2,166 +2,15 @@
 import { P } from './core/params.js';
 import { field, W, H, NX, NY, SX, NCELLS, PEG_TIP, PEG_BOTTOM, JET_LEN, FLOOR, pegs, nozzles, setField, floorY, mkNozzle, shade, clamp } from './core/field.js';
 import { u, v, u0, v0, pr, dv, curl, IX, setBnd, project, advect, vorticity, blockRect, pegWake, fluidStep, resetFluid, sample } from './core/fluid.js';
+import { makePump, pumps, updatePump, inject, shelfShade, suck, resetPumps } from './core/pumps.js';
+import { grav, shake, motion, screenAxes, onMotion, enableMotion, resetMotion, swirl, updateMotion } from './core/motion.js';
 
 setField(P.START_FIELD);
+// Угол игрового кадра для датчиков наклона: на телефоне кадр привязан к корпусу, на компьютере — к экрану
+motion.angle = () => (touchDevice() ? gameAngle : screenAngle());
 
 const PALETTE = ['#ff4d6d', '#ffd23f', '#3ddc97', '#4cc9f0', '#b388ff', '#ff9f1c', '#f15bb5', '#9ef01a'];
 const DUO = ['#ff3b5c', '#2f7dff'];
-
-// ---------- Насосы ----------
-function makePump() { return { held: false, id: null, y: 0, lastY: 0, lastT: 0, base: 0, boost: 0, flow: 0, stroke: 1, emit: 0, auto: 0 }; }
-const pumps = [makePump(), makePump()];
-
-function updatePump(p, dt) {
-  if (p.auto > 0) { p.auto -= dt; if (p.auto <= 0) p.held = false; }
-  const target = p.held && p.stroke > 0.001 ? Math.min(1, p.base + p.boost) : 0;
-  const k = target > p.flow ? 28 : 9;
-  p.flow += (target - p.flow) * (1 - Math.exp(-k * dt));
-  if (p.held) p.stroke = Math.max(0, p.stroke - p.flow * P.DRAIN * dt);
-  else p.stroke = Math.min(1, p.stroke + P.REFILL * dt);
-  p.boost *= Math.exp(-3 * dt);
-}
-
-// Струя — конус длиной JET_LEN: вода разгоняется вдоль всей его оси, а не только у сопла.
-function inject(side) {
-  const p = pumps[side];
-  if (!p.held && p.stroke < 1) suck(side, (1 - p.stroke));
-  if (p.flow < 0.01) return;
-  const n = nozzles[side], sp = p.flow * P.JET, len = JET_LEN * (0.5 + 0.5 * p.flow);
-  const mx = n.x + n.dx * 8, my = n.y + n.dy * 8;
-  const reach = len + 40;
-  const i0 = Math.max(1, Math.floor((mx - reach) / P.CELL) + 1), i1 = Math.min(NX, Math.floor((mx + reach) / P.CELL) + 1);
-  const j0 = Math.max(1, Math.floor((my - reach) / P.CELL) + 1), j1 = Math.min(NY, Math.floor((my + 20) / P.CELL) + 1);
-  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
-    const rx = (i - 0.5) * P.CELL - mx, ry = (j - 0.5) * P.CELL - my;
-    const along = rx * n.dx + ry * n.dy;
-    if (along < -P.CELL || along > len) continue;
-    const perp = Math.abs(rx * n.dy - ry * n.dx), width = P.JET_W0 + Math.max(0, along) * P.JET_SPREAD;
-    if (perp >= width) continue;
-    const f = Math.max(0, along) / len;
-    // у стенок струю гасим, иначе она "прилипает" к стеклу и уходит вдоль него
-    const cx = (i - 0.5) * P.CELL, wall = clamp(Math.min(cx, W - cx) / 50, 0, 1);
-    const a = 0.4 * (1 - f) * (1 - perp / width) * wall * shelfShade(mx, my, cx, (j - 0.5) * P.CELL);
-    const target = sp * (1 - 0.55 * f), k = IX(i, j);
-    u[k] += (n.dx * target - u[k]) * a;
-    v[k] += (n.dy * target - v[k]) * a;
-  }
-}
-
-// Полка-стопор заслоняет струю: точке за полкой (прямая к соплу проходит через полку) достаётся
-// лишь P.SHELF_LEAK напора. Края тени размыты, а за P.SHELF_SHADOW px над полкой поток уже сомкнулся —
-// кольцо на полке в тени, приподнятое выше — снова под струёй
-function shelfShade(mx, my, x, y) {
-  let k = 1;
-  for (const g of pegs) {
-    if (y >= g.bottom || my <= g.bottom || g.bottom - y >= P.SHELF_SHADOW) continue;
-    const xi = mx + (x - mx) * (my - g.bottom) / (my - y);
-    const cover = clamp((P.SHELF_W / 2 + 4 - Math.abs(xi - g.x)) / 8, 0, 1) * (1 - (g.bottom - y) / P.SHELF_SHADOW);
-    k *= 1 - (1 - P.SHELF_LEAK) * cover;
-  }
-  return k;
-}
-
-// Насос набирает воду обратно через сопло — вдоль дна к нему тянет кольца
-function suck(side, k) {
-  const n = nozzles[side], R = 90, sp = P.SUCTION * Math.min(1, k * 2);
-  const i0 = Math.max(1, Math.floor((n.x - R) / P.CELL) + 1), i1 = Math.min(NX, Math.floor((n.x + R) / P.CELL) + 1);
-  const j0 = Math.max(1, Math.floor((n.y - R) / P.CELL) + 1);
-  for (let j = j0; j <= NY; j++) for (let i = i0; i <= i1; i++) {
-    const rx = n.x - (i - 0.5) * P.CELL, ry = n.y - (j - 0.5) * P.CELL, d = Math.hypot(rx, ry);
-    if (d >= R || d < 1) continue;
-    const a = 0.15 * (1 - d / R), k2 = IX(i, j);
-    u[k2] += (rx / d * sp - u[k2]) * a;
-    v[k2] += (ry / d * sp - v[k2]) * a;
-  }
-}
-
-// ---------- Наклон и встряска телефона ----------
-// grav — сила тяжести в осях аквариума в долях G: x, y — в плоскости, z — к переднему стеклу.
-// Отсчёт от того, как телефон держали при старте партии: так держат — кольца тонут вниз как обычно;
-// повернул — «низ» поворачивается, перевернул — кольца падают к крышке, положил плашмя — ложатся на стекло.
-// Вода в полном аквариуме от наклона не течёт, тонут по нему только кольца.
-// shake — ускорение колец относительно аквариума при встряске, px/с²: аквариум дёрнулся — кольца отстали.
-const TILT_Z = 0.8, SHAKE_K = 250, SHAKE_DEAD = 2.5;
-const grav = { x: 0, y: 1, z: 0 }, shake = { x: 0, y: 0, z: 0 };
-const motion = { on: true, listening: false, sign: 0, tx: 0, ty: 1, tz: 0, m0: null, z0: null, keyTilt: 0, lp: null };
-
-// Оси устройства (x вправо, y к верху корпуса, z к зрителю) → оси игрового кадра (x вправо, y вниз, z к зрителю).
-// Кадр привязан к корпусу через gameAngle, а не к тому, как браузер сейчас повернул экран
-function screenAxes(x, y, z) {
-  const a = (touchDevice() ? gameAngle : screenAngle()) * Math.PI / 180;
-  const c = Math.cos(a), s = Math.sin(a);
-  return [x * c - y * s, -(x * s + y * c), z];
-}
-
-function onMotion(e) {
-  const g = e.accelerationIncludingGravity;
-  if (!motion.on || !g || g.x == null) return;
-  const [x, y, z] = screenAxes(g.x, g.y, g.z);
-  // Android и iOS расходятся в знаке. Телефон держат верхом вверх — по первому замеру и выбираем знак
-  if (!motion.sign) { if (Math.hypot(x, y) < 4) return; motion.sign = y < 0 ? -1 : 1; }
-  const dx = motion.sign * x, dy = motion.sign * y, dz = motion.sign * z / 9.81, m = Math.hypot(dx, dy);
-  if (motion.m0 == null) { motion.m0 = Math.max(m, 4); motion.z0 = dz; }
-  // Сила в плоскости — в долях от той, что была при старте; почти плашмя направление ненадёжно, его не трогаем
-  const k = Math.min(1, m / motion.m0);
-  if (m > 1.5) { motion.tx = dx / m * k; motion.ty = dy / m * k; }
-  else { const l = Math.hypot(motion.tx, motion.ty) || 1; motion.tx *= k / l; motion.ty *= k / l; }
-  motion.tz = clamp(dz - motion.z0, -1, 1) * TILT_Z;
-
-  let lx, ly, lz;
-  const a = e.acceleration;
-  if (a && a.x != null) [lx, ly, lz] = screenAxes(a.x, a.y, a.z);
-  else {
-    // Нет ускорения без гравитации — выделяем рывки фильтром из полного
-    if (!motion.lp) motion.lp = [x, y, z];
-    const lp = motion.lp;
-    lp[0] += (x - lp[0]) * 0.1; lp[1] += (y - lp[1]) * 0.1; lp[2] += (z - lp[2]) * 0.1;
-    lx = x - lp[0]; ly = y - lp[1]; lz = z - lp[2];
-  }
-  const mag = Math.hypot(lx, ly, lz);
-  if (mag > SHAKE_DEAD) {
-    const f = (mag - SHAKE_DEAD) / mag * SHAKE_K * motion.sign;
-    shake.x = lx * f; shake.y = ly * f; shake.z = lz * f * 0.3;
-  }
-}
-
-function enableMotion() {
-  if (motion.listening || !window.DeviceMotionEvent) return;
-  motion.listening = true;
-  const listen = () => window.addEventListener('devicemotion', onMotion);
-  if (typeof DeviceMotionEvent.requestPermission === 'function') {
-    DeviceMotionEvent.requestPermission().then(s => { if (s === 'granted') listen(); else motion.listening = false; })
-      .catch(() => { motion.listening = false; });
-  } else listen();
-}
-
-function resetMotion() {
-  grav.x = 0; grav.y = 1; grav.z = 0; shake.x = shake.y = shake.z = 0;
-  motion.tx = 0; motion.ty = 1; motion.tz = 0; motion.m0 = motion.z0 = null;
-}
-
-// Вихрь радиусом r: встряска взбалтывает воду у стенок
-function swirl(x, y, s, r) {
-  for (let j = 1; j <= NY; j++) for (let i = 1; i <= NX; i++) {
-    const rx = (i - 0.5) * P.CELL - x, ry = (j - 0.5) * P.CELL - y, d = Math.hypot(rx, ry);
-    if (d >= r) continue;
-    const k = IX(i, j), f = s * (1 - d / r) / r;
-    u[k] -= ry * f; v[k] += rx * f;
-  }
-}
-
-function updateMotion(dt) {
-  let tx = motion.on ? motion.tx : 0, ty = motion.on ? motion.ty : 1;
-  if (motion.keyTilt) { tx = Math.sin(motion.keyTilt * 0.5); ty = Math.cos(motion.keyTilt * 0.5); }
-  const k = 1 - Math.exp(-12 * dt);
-  grav.x += (tx - grav.x) * k; grav.y += (ty - grav.y) * k; grav.z += ((motion.on ? motion.tz : 0) - grav.z) * k;
-  const s = Math.hypot(shake.x, shake.y);
-  if (s > 1200 && Math.random() < 0.25) {
-    swirl(30 + Math.random() * (W - 60), 60 + Math.random() * (H - 160), (Math.random() < 0.5 ? -1 : 1) * Math.min(s, 6000) * 0.08, 50);
-  }
-  const e = Math.exp(-30 * dt);
-  shake.x *= e; shake.y *= e; shake.z *= e;
-}
 
 // ---------- Кольца ----------
 // Кольцо в профиль = два "сечения обода" (частицы), жёстко связанные на расстоянии D.
@@ -689,7 +538,6 @@ let state = 'menu', mode = 'classic', game = null, toastText = '', toastT = 0;
 
 function toast(t) { toastText = t; toastT = 1.8; }
 
-function resetPumps() { for (const p of pumps) Object.assign(p, makePump()); }
 
 function startGame(m) {
   mode = m; initAudio(); resetFluid(); resetPumps(); resetMotion();
