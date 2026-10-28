@@ -1,183 +1,12 @@
 'use strict';
+import { P } from './core/params.js';
+import { field, W, H, NX, NY, SX, NCELLS, PEG_TIP, PEG_BOTTOM, JET_LEN, FLOOR, pegs, nozzles, setField, floorY, mkNozzle, shade, clamp } from './core/field.js';
+import { u, v, u0, v0, pr, dv, curl, IX, setBnd, project, advect, vorticity, blockRect, pegWake, fluidStep, resetFluid, sample } from './core/fluid.js';
 
-// ---------- Мир ----------
-const CELL = 12;
-const RIM = 5, RING_D = 34, PEG_R = 3.5, G = 220, K_PAR = 1.6, K_PERP = 5.5, MAXV = 800;
-// Насос набирает воду заметно быстрее, чем выдаёт её, — как у настоящей игрушки
-const JET = 744, JET_W0 = 34, JET_SPREAD = 0.24, DRAIN = 2.2, REFILL = 4, VORT = 5, FLUID_DAMP = 0.6;
-// Надетое кольцо трётся о штырь (сильнее, если висит с наклоном) — одиночное нажатие его не сбивает,
-// а серия сильных струй может поднять над верхушкой и скинуть. PEG_SHELTER — доля потока, что до него доходит
-const PEG_SHELTER = 1, PEG_FRICTION = 3, PEG_BIND = 1, PEG_DRAG = 2, PEG_TWIST = 0.3;
-// Полка-стопор внизу штыря (ширина чуть больше кольца) — заслон для струи, см. shelfShade
-const SHELF_W = 50, SHELF_DRAG = 60, SHELF_LEAK = 0.3, SHELF_SHADOW = 80;
-// Видимое кувыркание кольца вокруг своей оси: phi — угол наклона к зрителю
-// Тонущее плоское кольцо стремится лечь горизонтально (главный рычаг сложности)
-const ALIGN = 20;
-// То же для наклона к зрителю: без него кувыркающееся кольцо почти не попадает на штырь
-const PHI_ALIGN = 6;
-// Доля выравнивания для надетого кольца: висит с наклоном, но струя ещё может его выпрямить и поднять
-const PEG_ALIGN = 0.3;
-// Скорость, с которой нанизанное на верхушку кольцо переваливается поперёк штыря, рад/с
-const HOOK_FLOP = 6;
-const SPIN_REST = 0.35, SPIN_K = 0.06, SPIN_MAX = 14, SUCTION = 264;
-// Аквариум узкий: глубина чуть больше диаметра кольца. z — глубина, плюс к зрителю.
-// Кольцо, лежащее плашмя, занимает её почти целиком и не пропускает другие кольца мимо себя;
-// разойтись по глубине могут только кольца, повёрнутые к зрителю.
-const TANK_Z = 25, Z_DAMP = 2.5, Z_JITTER = 0.5;
-const STEP = 1 / 60, SUB = 2;
+setField(P.START_FIELD);
 
-// Только альбомное поле. Раскладка зеркальна: сопло в nozzleX от стенки,
-// штырь в pegX, верхушка tip и полка bottom по y, струя бьёт на jetLen. Дно-горка — кольца скатываются к соплам.
-// Отдельные константы — чтобы tools/ могли их переопределять при подборе баланса
-const L_W = 648, L_H = 360, L_NOZZLE_X = 150, L_PEG_X = 230, L_TIP = 150, L_BOTTOM = 258, L_JET_LEN = 240;
-const FIELDS = {
-  landscape: {
-    W: L_W, H: L_H, nozzleX: L_NOZZLE_X, pegX: L_PEG_X, tip: L_TIP, bottom: L_BOTTOM, jetLen: L_JET_LEN,
-    floor: [[0, L_H - 46], [L_NOZZLE_X, L_H - 6], [L_W / 2, L_H - 50], [L_W - L_NOZZLE_X, L_H - 6], [L_W, L_H - 46]]
-  }
-};
-let field = '', W = 0, H = 0, NX = 0, NY = 0, SX = 0, NCELLS = 0, PEG_TIP = 0, PEG_BOTTOM = 0, JET_LEN = 0;
-let FLOOR = [], pegs = [], nozzles = [];
-let u, v, u0, v0, pr, dv, curl;
-
-// Всё, что зависит от размеров поля, включая сетку воды
-function setField(name) {
-  const f = FIELDS[name];
-  field = name; W = f.W; H = f.H; NX = W / CELL; NY = H / CELL; SX = NX + 2; NCELLS = (NX + 2) * (NY + 2);
-  PEG_TIP = f.tip; PEG_BOTTOM = f.bottom; JET_LEN = f.jetLen; FLOOR = f.floor;
-  pegs = [{ x: f.pegX, tip: f.tip, bottom: f.bottom }, { x: W - f.pegX, tip: f.tip, bottom: f.bottom }];
-  nozzles = [mkNozzle(f.nozzleX, H - 6, 0.3), mkNozzle(W - f.nozzleX, H - 6, -0.3)];
-  [u, v, u0, v0, pr, dv, curl] = Array.from({ length: 7 }, () => new Float64Array(NCELLS));
-}
-// Поле всегда альбомное; прежняя настройка ориентации не используется.
-const START_FIELD = 'landscape';
-setField(START_FIELD);
-
-const floorY = x => {
-  for (let i = 1; i < FLOOR.length; i++) {
-    const [x0, y0] = FLOOR[i - 1], [x1, y1] = FLOOR[i];
-    if (x <= x1) return y0 + (y1 - y0) * (x - x0) / (x1 - x0);
-  }
-  return H;
-};
 const PALETTE = ['#ff4d6d', '#ffd23f', '#3ddc97', '#4cc9f0', '#b388ff', '#ff9f1c', '#f15bb5', '#9ef01a'];
 const DUO = ['#ff3b5c', '#2f7dff'];
-
-function mkNozzle(x, y, dx) { const l = Math.hypot(dx, 1); return { x, y, dx: dx / l, dy: -1 / l }; }
-function shade(hex, f) {
-  const n = parseInt(hex.slice(1), 16);
-  return `rgb(${((n >> 16) & 255) * f | 0},${((n >> 8) & 255) * f | 0},${(n & 255) * f | 0})`;
-}
-const clamp = (x, a, b) => x < a ? a : x > b ? b : x;
-
-// ---------- Жидкость (stable fluids, сетка NX x NY) ----------
-const IX = (i, j) => i + SX * j;
-
-function setBnd(b, x) {
-  for (let j = 1; j <= NY; j++) {
-    x[IX(0, j)] = b === 1 ? -x[IX(1, j)] : x[IX(1, j)];
-    x[IX(NX + 1, j)] = b === 1 ? -x[IX(NX, j)] : x[IX(NX, j)];
-  }
-  for (let i = 1; i <= NX; i++) {
-    x[IX(i, 0)] = b === 2 ? -x[IX(i, 1)] : x[IX(i, 1)];
-    x[IX(i, NY + 1)] = b === 2 ? -x[IX(i, NY)] : x[IX(i, NY)];
-  }
-  x[IX(0, 0)] = 0.5 * (x[IX(1, 0)] + x[IX(0, 1)]);
-  x[IX(0, NY + 1)] = 0.5 * (x[IX(1, NY + 1)] + x[IX(0, NY)]);
-  x[IX(NX + 1, 0)] = 0.5 * (x[IX(NX, 0)] + x[IX(NX + 1, 1)]);
-  x[IX(NX + 1, NY + 1)] = 0.5 * (x[IX(NX, NY + 1)] + x[IX(NX + 1, NY)]);
-}
-
-// Давление не обнуляем между шагами — старт с прошлого решения сходится быстрее
-function project() {
-  for (let j = 1; j <= NY; j++) for (let i = 1, k = j * SX + 1; i <= NX; i++, k++) {
-    dv[k] = -0.5 * (u[k + 1] - u[k - 1] + v[k + SX] - v[k - SX]);
-  }
-  setBnd(0, dv);
-  for (let it = 0; it < 20; it++) {
-    for (let j = 1; j <= NY; j++) for (let i = 1, k = j * SX + 1; i <= NX; i++, k++) {
-      pr[k] = (dv[k] + pr[k - 1] + pr[k + 1] + pr[k - SX] + pr[k + SX]) * 0.25;
-    }
-    setBnd(0, pr);
-  }
-  for (let j = 1; j <= NY; j++) for (let i = 1; i <= NX; i++) {
-    const k = IX(i, j);
-    u[k] -= 0.5 * (pr[k + 1] - pr[k - 1]);
-    v[k] -= 0.5 * (pr[k + SX] - pr[k - SX]);
-  }
-  setBnd(1, u); setBnd(2, v);
-}
-
-function advect(b, d, d0, uu, vv, dt) {
-  const dt0 = dt / CELL;
-  for (let j = 1; j <= NY; j++) for (let i = 1; i <= NX; i++) {
-    const k = IX(i, j);
-    const x = clamp(i - dt0 * uu[k], 0.5, NX + 0.5), y = clamp(j - dt0 * vv[k], 0.5, NY + 0.5);
-    const i0 = x | 0, j0 = y | 0, s1 = x - i0, s0 = 1 - s1, t1 = y - j0, t0 = 1 - t1;
-    d[k] = s0 * (t0 * d0[IX(i0, j0)] + t1 * d0[IX(i0, j0 + 1)]) + s1 * (t0 * d0[IX(i0 + 1, j0)] + t1 * d0[IX(i0 + 1, j0 + 1)]);
-  }
-  setBnd(b, d);
-}
-
-function vorticity(dt) {
-  for (let j = 1; j <= NY; j++) for (let i = 1; i <= NX; i++) {
-    const k = IX(i, j);
-    curl[k] = 0.5 * ((v[k + 1] - v[k - 1]) - (u[k + SX] - u[k - SX]));
-  }
-  for (let j = 2; j < NY; j++) for (let i = 2; i < NX; i++) {
-    const k = IX(i, j);
-    let nx = 0.5 * (Math.abs(curl[k + 1]) - Math.abs(curl[k - 1]));
-    let ny = 0.5 * (Math.abs(curl[k + SX]) - Math.abs(curl[k - SX]));
-    const len = Math.hypot(nx, ny) + 1e-5;
-    // Вихри подкручиваем только в заметном потоке: иначе подкрутка сама держит вечный вихрь,
-    // вода не успокаивается и кольца бесконечно висят в слабом течении
-    const f = VORT * dt * clamp((Math.hypot(u[k], v[k]) - 20) / 80, 0, 1) / len;
-    u[k] += f * ny * curl[k];
-    v[k] -= f * nx * curl[k];
-  }
-}
-
-// Тормозим воду в прямоугольнике пропорционально тому, какую долю клетки он закрывает;
-// ku / kv — сила торможения поперёк x и y
-function blockRect(x0, x1, y0, y1, ku, kv, dt) {
-  const eu = 1 - Math.exp(-ku * dt), ev = 1 - Math.exp(-kv * dt);
-  for (let j = Math.max(1, Math.floor(y0 / CELL) + 1); j <= Math.min(NY, Math.floor(y1 / CELL) + 1); j++) {
-    const oy = Math.max(0, Math.min(y1, j * CELL) - Math.max(y0, (j - 1) * CELL)) / CELL;
-    for (let i = Math.max(1, Math.floor(x0 / CELL) + 1); i <= Math.min(NX, Math.floor(x1 / CELL) + 1); i++) {
-      const f = oy * Math.max(0, Math.min(x1, i * CELL) - Math.max(x0, (i - 1) * CELL)) / CELL, k = IX(i, j);
-      u[k] *= 1 - eu * f; v[k] *= 1 - ev * f;
-    }
-  }
-}
-
-// Штырь тонкий и поток почти не держит, но подтормаживает воду вдоль стержня — за ним срываются завихрения.
-// Полка-стопор внизу — пластина поперёк струи: вертикальный поток почти не пропускает, вода обтекает её
-// по краям, над полкой затишье (лежащие на ней кольца в «тени»), а с краёв срываются вихри
-function pegWake(dt) {
-  for (const g of pegs) {
-    blockRect(g.x - PEG_R, g.x + PEG_R, g.tip, g.bottom, PEG_DRAG * CELL / (2 * PEG_R), PEG_DRAG * CELL / (2 * PEG_R), dt);
-    blockRect(g.x - SHELF_W / 2, g.x + SHELF_W / 2, g.bottom - 3, g.bottom + 4, SHELF_DRAG * 0.2, SHELF_DRAG, dt);
-  }
-}
-
-function fluidStep(dt) {
-  pegWake(dt);
-  vorticity(dt);
-  const damp = Math.exp(-FLUID_DAMP * dt);
-  for (let k = 0; k < NCELLS; k++) { u[k] *= damp; v[k] *= damp; }
-  u0.set(u); v0.set(v);
-  advect(1, u, u0, u0, v0, dt);
-  advect(2, v, v0, u0, v0, dt);
-  project();
-}
-
-function resetFluid() { u.fill(0); v.fill(0); pr.fill(0); }
-
-function sample(f, x, y) {
-  const gx = clamp(x / CELL + 0.5, 0.5, NX + 0.5), gy = clamp(y / CELL + 0.5, 0.5, NY + 0.5);
-  const i0 = gx | 0, j0 = gy | 0, s = gx - i0, t = gy - j0;
-  return (1 - s) * ((1 - t) * f[IX(i0, j0)] + t * f[IX(i0, j0 + 1)]) + s * ((1 - t) * f[IX(i0 + 1, j0)] + t * f[IX(i0 + 1, j0 + 1)]);
-}
 
 // ---------- Насосы ----------
 function makePump() { return { held: false, id: null, y: 0, lastY: 0, lastT: 0, base: 0, boost: 0, flow: 0, stroke: 1, emit: 0, auto: 0 }; }
@@ -188,8 +17,8 @@ function updatePump(p, dt) {
   const target = p.held && p.stroke > 0.001 ? Math.min(1, p.base + p.boost) : 0;
   const k = target > p.flow ? 28 : 9;
   p.flow += (target - p.flow) * (1 - Math.exp(-k * dt));
-  if (p.held) p.stroke = Math.max(0, p.stroke - p.flow * DRAIN * dt);
-  else p.stroke = Math.min(1, p.stroke + REFILL * dt);
+  if (p.held) p.stroke = Math.max(0, p.stroke - p.flow * P.DRAIN * dt);
+  else p.stroke = Math.min(1, p.stroke + P.REFILL * dt);
   p.boost *= Math.exp(-3 * dt);
 }
 
@@ -198,21 +27,21 @@ function inject(side) {
   const p = pumps[side];
   if (!p.held && p.stroke < 1) suck(side, (1 - p.stroke));
   if (p.flow < 0.01) return;
-  const n = nozzles[side], sp = p.flow * JET, len = JET_LEN * (0.5 + 0.5 * p.flow);
+  const n = nozzles[side], sp = p.flow * P.JET, len = JET_LEN * (0.5 + 0.5 * p.flow);
   const mx = n.x + n.dx * 8, my = n.y + n.dy * 8;
   const reach = len + 40;
-  const i0 = Math.max(1, Math.floor((mx - reach) / CELL) + 1), i1 = Math.min(NX, Math.floor((mx + reach) / CELL) + 1);
-  const j0 = Math.max(1, Math.floor((my - reach) / CELL) + 1), j1 = Math.min(NY, Math.floor((my + 20) / CELL) + 1);
+  const i0 = Math.max(1, Math.floor((mx - reach) / P.CELL) + 1), i1 = Math.min(NX, Math.floor((mx + reach) / P.CELL) + 1);
+  const j0 = Math.max(1, Math.floor((my - reach) / P.CELL) + 1), j1 = Math.min(NY, Math.floor((my + 20) / P.CELL) + 1);
   for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
-    const rx = (i - 0.5) * CELL - mx, ry = (j - 0.5) * CELL - my;
+    const rx = (i - 0.5) * P.CELL - mx, ry = (j - 0.5) * P.CELL - my;
     const along = rx * n.dx + ry * n.dy;
-    if (along < -CELL || along > len) continue;
-    const perp = Math.abs(rx * n.dy - ry * n.dx), width = JET_W0 + Math.max(0, along) * JET_SPREAD;
+    if (along < -P.CELL || along > len) continue;
+    const perp = Math.abs(rx * n.dy - ry * n.dx), width = P.JET_W0 + Math.max(0, along) * P.JET_SPREAD;
     if (perp >= width) continue;
     const f = Math.max(0, along) / len;
     // у стенок струю гасим, иначе она "прилипает" к стеклу и уходит вдоль него
-    const cx = (i - 0.5) * CELL, wall = clamp(Math.min(cx, W - cx) / 50, 0, 1);
-    const a = 0.4 * (1 - f) * (1 - perp / width) * wall * shelfShade(mx, my, cx, (j - 0.5) * CELL);
+    const cx = (i - 0.5) * P.CELL, wall = clamp(Math.min(cx, W - cx) / 50, 0, 1);
+    const a = 0.4 * (1 - f) * (1 - perp / width) * wall * shelfShade(mx, my, cx, (j - 0.5) * P.CELL);
     const target = sp * (1 - 0.55 * f), k = IX(i, j);
     u[k] += (n.dx * target - u[k]) * a;
     v[k] += (n.dy * target - v[k]) * a;
@@ -220,26 +49,26 @@ function inject(side) {
 }
 
 // Полка-стопор заслоняет струю: точке за полкой (прямая к соплу проходит через полку) достаётся
-// лишь SHELF_LEAK напора. Края тени размыты, а за SHELF_SHADOW px над полкой поток уже сомкнулся —
+// лишь P.SHELF_LEAK напора. Края тени размыты, а за P.SHELF_SHADOW px над полкой поток уже сомкнулся —
 // кольцо на полке в тени, приподнятое выше — снова под струёй
 function shelfShade(mx, my, x, y) {
   let k = 1;
   for (const g of pegs) {
-    if (y >= g.bottom || my <= g.bottom || g.bottom - y >= SHELF_SHADOW) continue;
+    if (y >= g.bottom || my <= g.bottom || g.bottom - y >= P.SHELF_SHADOW) continue;
     const xi = mx + (x - mx) * (my - g.bottom) / (my - y);
-    const cover = clamp((SHELF_W / 2 + 4 - Math.abs(xi - g.x)) / 8, 0, 1) * (1 - (g.bottom - y) / SHELF_SHADOW);
-    k *= 1 - (1 - SHELF_LEAK) * cover;
+    const cover = clamp((P.SHELF_W / 2 + 4 - Math.abs(xi - g.x)) / 8, 0, 1) * (1 - (g.bottom - y) / P.SHELF_SHADOW);
+    k *= 1 - (1 - P.SHELF_LEAK) * cover;
   }
   return k;
 }
 
 // Насос набирает воду обратно через сопло — вдоль дна к нему тянет кольца
 function suck(side, k) {
-  const n = nozzles[side], R = 90, sp = SUCTION * Math.min(1, k * 2);
-  const i0 = Math.max(1, Math.floor((n.x - R) / CELL) + 1), i1 = Math.min(NX, Math.floor((n.x + R) / CELL) + 1);
-  const j0 = Math.max(1, Math.floor((n.y - R) / CELL) + 1);
+  const n = nozzles[side], R = 90, sp = P.SUCTION * Math.min(1, k * 2);
+  const i0 = Math.max(1, Math.floor((n.x - R) / P.CELL) + 1), i1 = Math.min(NX, Math.floor((n.x + R) / P.CELL) + 1);
+  const j0 = Math.max(1, Math.floor((n.y - R) / P.CELL) + 1);
   for (let j = j0; j <= NY; j++) for (let i = i0; i <= i1; i++) {
-    const rx = n.x - (i - 0.5) * CELL, ry = n.y - (j - 0.5) * CELL, d = Math.hypot(rx, ry);
+    const rx = n.x - (i - 0.5) * P.CELL, ry = n.y - (j - 0.5) * P.CELL, d = Math.hypot(rx, ry);
     if (d >= R || d < 1) continue;
     const a = 0.15 * (1 - d / R), k2 = IX(i, j);
     u[k2] += (rx / d * sp - u[k2]) * a;
@@ -314,7 +143,7 @@ function resetMotion() {
 // Вихрь радиусом r: встряска взбалтывает воду у стенок
 function swirl(x, y, s, r) {
   for (let j = 1; j <= NY; j++) for (let i = 1; i <= NX; i++) {
-    const rx = (i - 0.5) * CELL - x, ry = (j - 0.5) * CELL - y, d = Math.hypot(rx, ry);
+    const rx = (i - 0.5) * P.CELL - x, ry = (j - 0.5) * P.CELL - y, d = Math.hypot(rx, ry);
     if (d >= r) continue;
     const k = IX(i, j), f = s * (1 - d / r) / r;
     u[k] -= ry * f; v[k] += rx * f;
@@ -345,7 +174,7 @@ function makeRing(x, y, ang, D, col, ci) {
     a: { x: x - hx, y: y - hy, px: x - hx, py: y - hy },
     b: { x: x + hx, y: y + hy, px: x + hx, py: y + hy },
     D, col, dark: shade(col, 0.6), ci, on: -1, shown: -1, tinkT: 0,
-    phi: SPIN_REST + (Math.random() < 0.5 ? 0 : Math.PI), om: 0, z: 0, pz: 0, hook: -1, support: false,
+    phi: P.SPIN_REST + (Math.random() < 0.5 ? 0 : Math.PI), om: 0, z: 0, pz: 0, hook: -1, support: false,
     mark: pegs.map(() => false), eng: pegs.map(() => false)
   };
   updateDepth(R);
@@ -357,22 +186,22 @@ function makeRing(x, y, ang, D, col, ci) {
 // zHole — насколько надетое кольцо может сместиться вглубь, пока штырь остаётся в дырке
 function updateDepth(R) {
   const c = R.D / 2 * Math.abs(Math.cos(R.phi));
-  R.hz = c + RIM;
-  R.zWall = Math.max(0, TANK_Z - R.hz);
-  R.zHole = Math.max(0, c - RIM - PEG_R);
+  R.hz = c + P.RIM;
+  R.zWall = Math.max(0, P.TANK_Z - R.hz);
+  R.zHole = Math.max(0, c - P.RIM - P.PEG_R);
 }
 const engaged = R => R.on >= 0 || R.eng[0] || R.eng[1];
 // Наклон «плашмя» к зрителю: при наклоне телефона на себя / от себя кольца ложатся плашмя к новому «низу»
-const phiRest = () => SPIN_REST - Math.atan2(grav.z, Math.max(0.1, Math.hypot(grav.x, grav.y)));
+const phiRest = () => P.SPIN_REST - Math.atan2(grav.z, Math.max(0.1, Math.hypot(grav.x, grav.y)));
 const zLim = R => engaged(R) ? R.zHole : R.zWall;
 
 function spawnRings(n, D, duo) {
   for (let i = 0; i < n; i++) {
     let x = 0, y = 0;
     for (let tries = 0; tries < 60; tries++) {
-      x = D / 2 + RIM + 6 + Math.random() * (W - D - 2 * RIM - 12);
-      y = floorY(x) - RIM - 6 - Math.random() * 70;
-      const ok = pegs.every(g => Math.abs(x - g.x) > D / 2 + RIM + 6) &&
+      x = D / 2 + P.RIM + 6 + Math.random() * (W - D - 2 * P.RIM - 12);
+      y = floorY(x) - P.RIM - 6 - Math.random() * 70;
+      const ok = pegs.every(g => Math.abs(x - g.x) > D / 2 + P.RIM + 6) &&
         rings.every(r => Math.hypot((r.a.x + r.b.x) / 2 - x, (r.a.y + r.b.y) / 2 - y) > D * 0.9);
       if (ok) break;
     }
@@ -384,18 +213,18 @@ function spawnRings(n, D, duo) {
 function integrateRing(R, dt) {
   let tx = R.b.x - R.a.x, ty = R.b.y - R.a.y;
   const L = Math.hypot(tx, ty) || 1; tx /= L; ty /= L;
-  const ePar = Math.exp(-K_PAR * dt), ePerp = Math.exp(-K_PERP * dt);
+  const ePar = Math.exp(-P.K_PAR * dt), ePerp = Math.exp(-P.K_PERP * dt);
   const onPeg = R.on >= 0, shelter = onPeg ? PEG_SHELTER : 1;
   // Надетое кольцо выравниваться не стремится, а висит на штыре с наклоном —
   // и чем сильнее наклонено (в плоскости или к зрителю), тем сильнее закусывает стержень
   let rub = 1;
   if (onPeg) {
     const dp = (R.phi % Math.PI + Math.PI * 1.5) % Math.PI - Math.PI / 2;
-    rub = Math.exp(-PEG_FRICTION * (1 + PEG_BIND * Math.hypot((R.a.y - R.b.y) / R.D, Math.sin(dp))) * dt);
+    rub = Math.exp(-P.PEG_FRICTION * (1 + P.PEG_BIND * Math.hypot((R.a.y - R.b.y) / R.D, Math.sin(dp))) * dt);
   }
   // Кольцо выравнивается поперёк силы тяжести — при наклоне телефона ложится по новому «низу».
   // Надетое — лишь слегка: иначе висит ребром к струе, и вода не может поднять его со штыря
-  const level = (onPeg && !R.support && !R.ground ? PEG_ALIGN : 1) * ((R.a.x - R.b.x) * grav.x + (R.a.y - R.b.y) * grav.y) * ALIGN * dt;
+  const level = (onPeg && !R.support && !R.ground ? PEG_ALIGN : 1) * ((R.a.x - R.b.x) * grav.x + (R.a.y - R.b.y) * grav.y) * P.ALIGN * dt;
   for (let n = 0; n < 2; n++) {
     const p = n ? R.b : R.a, lv = n ? level : -level;
     let vx = (p.x - p.px) / dt + lv * grav.x, vy = (p.y - p.py) / dt;
@@ -404,36 +233,36 @@ function integrateRing(R, dt) {
     // Сопротивление воды: плашмя кольцо тормозится сильнее, чем ребром — отсюда "планирование"
     const rx = vx - fu, ry = vy - fv, par = rx * tx + ry * ty;
     const ax = par * tx, ay = par * ty;
-    vx = fu + ax * ePar + (rx - ax) * ePerp + (G * grav.x + shake.x) * dt;
-    vy = fv + ay * ePar + (ry - ay) * ePerp + (G * grav.y + shake.y) * dt;
+    vx = fu + ax * ePar + (rx - ax) * ePerp + (P.G * grav.x + shake.x) * dt;
+    vy = fv + ay * ePar + (ry - ay) * ePerp + (P.G * grav.y + shake.y) * dt;
     const sp = Math.hypot(vx, vy);
-    if (sp > MAXV) { vx *= MAXV / sp; vy *= MAXV / sp; }
+    if (sp > P.MAXV) { vx *= P.MAXV / sp; vy *= P.MAXV / sp; }
     p.px = p.x; p.py = p.y;
     p.x += vx * dt; p.y += vy * dt;
   }
   // Поток плоский и вглубь не толкает: по z кольцо движется от соседей, стёкол, наклона и встряски
-  const vz = (R.z - R.pz) * Math.exp(-Z_DAMP * dt) + (G * grav.z + shake.z) * dt * dt;
+  const vz = (R.z - R.pz) * Math.exp(-P.Z_DAMP * dt) + (P.G * grav.z + shake.z) * dt * dt;
   R.pz = R.z; R.z += vz;
 }
 
 // Зацепленное кольцо (надетое или заходящее на штырь сверху) держится на стержне здесь.
 // Остальные сталкиваются со штырём целиком в collidePegs — если не разошлись с ним по глубине.
 function collideStatic(p, R) {
-  if (p.x < RIM) p.x = RIM; else if (p.x > W - RIM) p.x = W - RIM;
-  if (p.y < RIM) p.y = RIM; else if (p.y > H - RIM) p.y = H - RIM;
+  if (p.x < P.RIM) p.x = P.RIM; else if (p.x > W - P.RIM) p.x = W - P.RIM;
+  if (p.y < P.RIM) p.y = P.RIM; else if (p.y > H - P.RIM) p.y = H - P.RIM;
   for (let i = 1; i < FLOOR.length; i++) {
     const [x0, y0] = FLOOR[i - 1], [x1, y1] = FLOOR[i];
     const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy), nx = dy / L, ny = -dx / L;
     const t = ((p.x - x0) * dx + (p.y - y0) * dy) / (L * L);
     if (t < 0 || t > 1) continue;
     const s = (p.x - x0) * nx + (p.y - y0) * ny;
-    if (s < RIM && s > -40) { p.x += nx * (RIM - s); p.y += ny * (RIM - s); p.c = 1; }
+    if (s < P.RIM && s > -40) { p.x += nx * (P.RIM - s); p.y += ny * (P.RIM - s); p.c = 1; }
   }
   for (let i = 1; i < FLOOR.length - 1; i++) {
     const dx = p.x - FLOOR[i][0], dy = p.y - FLOOR[i][1], d = Math.hypot(dx, dy);
-    if (d < RIM && d > 1e-6 && FLOOR[i][1] < FLOOR[i - 1][1]) { p.x += dx / d * (RIM - d); p.y += dy / d * (RIM - d); p.c = 1; }
+    if (d < P.RIM && d > 1e-6 && FLOOR[i][1] < FLOOR[i - 1][1]) { p.x += dx / d * (P.RIM - d); p.y += dy / d * (P.RIM - d); p.c = 1; }
   }
-  const md = RIM + PEG_R;
+  const md = P.RIM + P.PEG_R;
   for (let k = 0; k < pegs.length; k++) {
     const g = pegs[k];
     if (!R.eng[k] || R.hook === k) continue;
@@ -445,7 +274,7 @@ function collideStatic(p, R) {
       if (d < 1e-6) { nx = p.px < g.x ? -1 : 1; ny = 0; } else { nx = dx / d; ny = dy / d; }
       p.x = g.x + nx * md; p.y = g.tip + ny * md;
     } else {
-      const stop = g.bottom - RIM - 3;
+      const stop = g.bottom - P.RIM - 3;
       if (p.y > stop) { p.y = stop; p.c = 1; }
       // Штырь в дырке: края кольца всегда по разные стороны стержня — вбок кольцо не соскользнёт,
       // сойти со штыря можно только через верхушку
@@ -463,14 +292,14 @@ function collideStatic(p, R) {
 function holeHasPeg(R, g, fromTop, tol = 0) {
   const L = Math.hypot(R.b.x - R.a.x, R.b.y - R.a.y) || 1, tx = (R.b.x - R.a.x) / L, ty = (R.b.y - R.a.y) / L;
   const c = Math.cos(R.phi), nx = ty * c, ny = -tx * c, nz = Math.sin(R.phi);
-  const cx = (R.a.x + R.b.x) / 2, cy = (R.a.y + R.b.y) / 2, dx = g.x - cx, rin = R.D / 2 - RIM - PEG_R + tol;
+  const cx = (R.a.x + R.b.x) / 2, cy = (R.a.y + R.b.y) / 2, dx = g.x - cx, rin = R.D / 2 - P.RIM - P.PEG_R + tol;
   if (Math.abs(ny) > 0.2) {
     const y = cy - (nx * dx - nz * R.z) / ny;
     return y >= g.tip - 2 && y <= (fromTop ? g.tip + rin : g.bottom) && Math.hypot(dx, y - cy, R.z) < rin;
   }
   // Кольцо стоит почти вертикально: штырь должен лежать в его плоскости (с допуском на толщину обода —
   // упёршись в обод изнутри, кольцо доворачивается), а верхушка — войти в дырку
-  if (Math.abs(nx * dx - nz * R.z) > PEG_R + RIM) return false;
+  if (Math.abs(nx * dx - nz * R.z) > P.PEG_R + P.RIM) return false;
   const h = Math.hypot(dx, R.z);
   if (h >= rin) return false;
   const half = Math.sqrt(rin * rin - h * h);
@@ -480,7 +309,7 @@ function holeHasPeg(R, g, fromTop, tol = 0) {
 // Нанизанное на верхушку кольцо (хоть стоймя) повисает на ней и под своим весом переваливается
 // поперёк штыря — дальше оно уже обычное надетое
 function flopRing(R, g, dt) {
-  const cx = (R.a.x + R.b.x) / 2, cy = (R.a.y + R.b.y) / 2, step = HOOK_FLOP * dt;
+  const cx = (R.a.x + R.b.x) / 2, cy = (R.a.y + R.b.y) / 2, step = P.HOOK_FLOP * dt;
   const e = (Math.atan2(R.b.y - R.a.y, R.b.x - R.a.x) % Math.PI + Math.PI * 1.5) % Math.PI - Math.PI / 2;
   const r = -Math.sign(e) * Math.min(Math.abs(e), step), c = Math.cos(r), s = Math.sin(r);
   const pull = (g.x - cx) * Math.min(1, 8 * dt);
@@ -502,17 +331,17 @@ function updateThread(R) {
   const aligned = Math.abs(R.z) <= R.zHole && R.zHole > 0;
   for (let k = 0; k < pegs.length; k++) {
     const g = pegs[k];
-    const straddle = lo < g.x - PEG_R && hi > g.x + PEG_R;
+    const straddle = lo < g.x - P.PEG_R && hi > g.x + P.PEG_R;
     // Надето, пока стержень проходит сквозь дырку: наклонённое кольцо сходит, как только дырка поднялась над верхушкой
     if (R.on === k && ((R.a.y < g.tip && R.b.y < g.tip) || !holeHasPeg(R, g, false, 1.5))) R.on = -1;
-    if (R.a.y < g.tip - RIM && R.b.y < g.tip - RIM) R.mark[k] = true;
+    if (R.a.y < g.tip - P.RIM && R.b.y < g.tip - P.RIM) R.mark[k] = true;
     else if (!straddle) R.mark[k] = false;
     if (R.hook === k) {
       if (straddle && Math.abs(R.b.y - R.a.y) < R.D * 0.5) { R.hook = -1; R.mark[k] = true; }
       else if (!holeHasPeg(R, g, false, 3)) R.hook = -1;
     } else if (R.hook < 0 && R.on < 0 && !R.eng[k] && holeHasPeg(R, g, true)) { R.hook = k; R.mark[k] = true; }
     const cross = straddle ? R.a.y + (R.b.y - R.a.y) * (g.x - R.a.x) / (R.b.x - R.a.x) : H;
-    R.eng[k] = R.on === k || R.hook === k || (straddle && R.mark[k] && (R.eng[k] || (aligned && cross < g.tip + 2 * RIM)));
+    R.eng[k] = R.on === k || R.hook === k || (straddle && R.mark[k] && (R.eng[k] || (aligned && cross < g.tip + 2 * P.RIM)));
     if (R.on < 0 && R.hook < 0 && R.eng[k] && R.a.y > g.tip + 1 && R.b.y > g.tip + 1) R.on = k;
   }
 }
@@ -539,7 +368,7 @@ function pushRing(R, s, dx, dy) {
 // выбираем путь короче, если стёкла (или штырь в дырке) оставляют для него место.
 // Развернуть кольцо к зрителю так, чтобы по глубине оно занимало не больше hz
 function narrowRing(R, hz) {
-  const need = Math.acos(clamp((hz - RIM) / (R.D / 2), 0, 1));
+  const need = Math.acos(clamp((hz - P.RIM) / (R.D / 2), 0, 1));
   const dp = (R.phi % Math.PI + Math.PI * 1.5) % Math.PI - Math.PI / 2, sg = dp < 0 ? -1 : 1;
   if (Math.abs(dp) >= need) return;
   R.phi += sg * (need - Math.abs(dp));
@@ -558,16 +387,16 @@ function ringPair(A, B) {
   const s = SEG.s, t = SEG.t;
   const px = A.a.x + (A.b.x - A.a.x) * s, py = A.a.y + (A.b.y - A.a.y) * s;
   let nx = B.a.x + (B.b.x - B.a.x) * t - px, ny = B.a.y + (B.b.y - B.a.y) * t - py;
-  const d = Math.hypot(nx, ny), md = 2 * RIM;
+  const d = Math.hypot(nx, ny), md = 2 * P.RIM;
   if (d >= md) return;
   // Глубоко вошли друг в друга — значит, одно проплывало перед другим и начало ложиться плашмя.
   // Лечь ему не даём, пока не разминутся, вместо того чтобы отшвыривать вбок
-  if (d < RIM) {
+  if (d < P.RIM) {
     const F = !engaged(A) && (engaged(B) || A.hz <= B.hz) ? A : !engaged(B) ? B : null;
-    if (F) { narrowRing(F, Math.max(RIM, F.hz - penZ)); penZ = A.hz + B.hz - Math.abs(dz); if (penZ <= 0) return; }
+    if (F) { narrowRing(F, Math.max(P.RIM, F.hz - penZ)); penZ = A.hz + B.hz - Math.abs(dz); if (penZ <= 0) return; }
   }
   const roomA = Math.max(0, zLim(A) + sg * A.z), roomB = Math.max(0, zLim(B) - sg * B.z);
-  if ((penZ < md - d || d < RIM) && penZ <= roomA + roomB) {
+  if ((penZ < md - d || d < P.RIM) && penZ <= roomA + roomB) {
     const mA = Math.min(roomA, Math.max(penZ / 2, penZ - roomB));
     shiftZ(A, -sg * mA); shiftZ(B, sg * (penZ - mA));
     return;
@@ -588,27 +417,27 @@ function ringPair(A, B) {
 function collidePegs(R) {
   for (let k = 0; k < pegs.length; k++) {
     if (R.eng[k]) continue;
-    const g = pegs[k], penZ = R.hz + PEG_R - Math.abs(R.z);
+    const g = pegs[k], penZ = R.hz + P.PEG_R - Math.abs(R.z);
     if (penZ <= 0) continue;
     segParams(R.a.x, R.a.y, R.b.x, R.b.y, g.x, g.tip, g.x, g.bottom);
     const s = SEG.s, qy = g.tip + (g.bottom - g.tip) * SEG.t;
     let nx = R.a.x + (R.b.x - R.a.x) * s - g.x, ny = R.a.y + (R.b.y - R.a.y) * s - qy;
-    const d = Math.hypot(nx, ny), md = RIM + PEG_R;
+    const d = Math.hypot(nx, ny), md = P.RIM + P.PEG_R;
     if (d >= md) continue;
     const side = R.z < 0 ? -1 : 1;
     if (penZ < md - d && penZ <= R.zWall - Math.abs(R.z)) { shiftZ(R, side * penZ); continue; }
     // Глубоко зашло — проплывало перед штырём или за ним и начало ложиться. Держим его развёрнутым
     // и отодвинутым по глубине, пока не минует стержень, а не отшвыриваем вбок
-    if (d < RIM) {
-      const zt = clamp(Math.abs(R.z), PEG_R + RIM + 0.5, TANK_Z - RIM);
-      narrowRing(R, Math.min(zt - PEG_R, TANK_Z - zt));
+    if (d < P.RIM) {
+      const zt = clamp(Math.abs(R.z), P.PEG_R + P.RIM + 0.5, P.TANK_Z - P.RIM);
+      narrowRing(R, Math.min(zt - P.PEG_R, P.TANK_Z - zt));
       shiftZ(R, side * zt - R.z);
       continue;
     }
     nx /= d; ny /= d;
     pushRing(R, s, nx * (md - d), ny * (md - d));
     // Упёршись в стержень краем, кольцо проворачивается к зрителю и соскальзывает за штырь или перед ним
-    const dp = (R.phi % Math.PI + Math.PI * 1.5) % Math.PI - Math.PI / 2, tw = (dp < 0 ? -1 : 1) * (md - d) * PEG_TWIST;
+    const dp = (R.phi % Math.PI + Math.PI * 1.5) % Math.PI - Math.PI / 2, tw = (dp < 0 ? -1 : 1) * (md - d) * P.PEG_TWIST;
     R.phi += tw; R.om += tw * 10;
     shiftZ(R, side * (md - d) * 0.5);
   }
@@ -650,9 +479,9 @@ function physics(dt) {
 function updateSpin(R, dt) {
   const cx = (R.a.x + R.b.x) / 2, cy = (R.a.y + R.b.y) / 2;
   const vx = (R.a.x - R.a.px + R.b.x - R.b.px) / 2, vy = (R.a.y - R.a.py + R.b.y - R.b.py) / 2;
-  const speed = Math.hypot(vx, vy) / (STEP / SUB);
-  const rel = Math.hypot(vx / (STEP / SUB) - sample(u, cx, cy), vy / (STEP / SUB) - sample(v, cx, cy));
-  const target = clamp(-sample(curl, cx, cy) * SPIN_K, -SPIN_MAX, SPIN_MAX);
+  const speed = Math.hypot(vx, vy) / (P.STEP / P.SUB);
+  const rel = Math.hypot(vx / (P.STEP / P.SUB) - sample(u, cx, cy), vy / (P.STEP / P.SUB) - sample(v, cx, cy));
+  const target = clamp(-sample(curl, cx, cy) * P.SPIN_K, -P.SPIN_MAX, P.SPIN_MAX);
   R.om += (target - R.om) * (1 - Math.exp(-3 * dt)) + (Math.random() - 0.5) * rel * 0.02;
   // Тонущее кольцо и само разворачивается плашмя, но вихрь его легко перебарывает; легшее на дно — ложится плашмя сразу.
   // Надетое висит как повисло (трение о стержень гасит вращение), а легши на полку или на кольцо под ним —
@@ -663,12 +492,12 @@ function updateSpin(R, dt) {
   else if (settled || (speed < 25 && R.ground)) {
     R.om += rest * 40 * dt;
     R.om *= Math.exp(-6 * dt);
-  } else R.om += rest * PHI_ALIGN * dt;
-  R.om = clamp(R.om, -SPIN_MAX, SPIN_MAX);
+  } else R.om += rest * P.PHI_ALIGN * dt;
+  R.om = clamp(R.om, -P.SPIN_MAX, P.SPIN_MAX);
   R.phi += R.om * dt;
   // Штырь в дырке не даёт кольцу встать к зрителю: наклон ограничен, пока обод не упрётся в стержень
   if (engaged(R)) {
-    const maxTilt = Math.acos(Math.min(1, (Math.abs(R.z) + RIM + PEG_R) / (R.D / 2)));
+    const maxTilt = Math.acos(Math.min(1, (Math.abs(R.z) + P.RIM + P.PEG_R) / (R.D / 2)));
     const d = (R.phi % Math.PI + Math.PI * 1.5) % Math.PI - Math.PI / 2;
     if (Math.abs(d) > maxTilt) {
       R.phi -= d - Math.sign(d) * maxTilt;
@@ -676,7 +505,7 @@ function updateSpin(R, dt) {
     }
   }
   // Завихрения понемногу гоняют кольцо вперёд-назад по глубине
-  const j = (Math.random() - 0.5) * rel * Z_JITTER * dt;
+  const j = (Math.random() - 0.5) * rel * P.Z_JITTER * dt;
   R.z += j; R.pz += j;
 }
 
@@ -714,7 +543,7 @@ function updateFx(dt) {
       p.emit -= 1;
       if (bubbles.length < 320) bubbles.push({
         x: n.x + (Math.random() - 0.5) * 10, y: n.y - 6, r: 1.2 + Math.random() * 3.2,
-        vx: n.dx * p.flow * JET * 0.5, vy: n.dy * p.flow * JET * 0.5
+        vx: n.dx * p.flow * P.JET * 0.5, vy: n.dy * p.flow * P.JET * 0.5
       });
     }
   }
@@ -869,8 +698,8 @@ function startGame(m) {
   if (touchDevice()) { pickGameAngle(); layout(); lockScreen(); }
   rings = []; bubbles.length = 0; sparks.length = 0;
   game = { t: 0, left: 0, score: 0, wave: 1, hold: 0, presses: 0 };
-  if (m === 'classic') { spawnRings(8, RING_D, false); toast('Надень все кольца'); }
-  else if (m === 'colors') { game.left = 90; spawnRings(8, RING_D - 2, true); toast('Красные — влево, синие — вправо'); }
+  if (m === 'classic') { spawnRings(8, P.RING_D, false); toast('Надень все кольца'); }
+  else if (m === 'colors') { game.left = 90; spawnRings(8, P.RING_D - 2, true); toast('Красные — влево, синие — вправо'); }
   else { game.left = 60; spawnWave(); toast('Волна 1'); }
   state = 'play';
   if (!tutSeen() || tut.force) tutStart();
@@ -895,7 +724,7 @@ function tutUpdate(dt) {
 }
 
 function spawnWave() {
-  const n = Math.min(10, 4 + game.wave), D = Math.max(RING_D - 12, RING_D + 2 - 3 * (game.wave - 1));
+  const n = Math.min(10, 4 + game.wave), D = Math.max(P.RING_D - 12, P.RING_D + 2 - 3 * (game.wave - 1));
   spawnRings(n, D, false);
 }
 
@@ -979,7 +808,7 @@ function tick(dt) {
   updatePump(pumps[0], dt); updatePump(pumps[1], dt);
   inject(0); inject(1);
   fluidStep(dt);
-  for (let i = 0; i < SUB; i++) physics(dt / SUB);
+  for (let i = 0; i < P.SUB; i++) physics(dt / P.SUB);
   checkThreads(dt);
   updateFx(dt);
   if (state === 'play') { gameLogic(dt); tutUpdate(dt); }
@@ -1140,7 +969,7 @@ function show(name) {
 }
 function pauseGame() { if (state !== 'play') return; state = 'pause'; resetPumps(); show('pause'); }
 function resumeGame() { initAudio(); state = 'play'; show(null); }
-function toMenu() { state = 'menu'; resetFluid(); resetPumps(); rings = []; spawnRings(8, RING_D, false); show('menu'); }
+function toMenu() { state = 'menu'; resetFluid(); resetPumps(); rings = []; spawnRings(8, P.RING_D, false); show('menu'); }
 
 document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => startGame(b.dataset.mode)));
 document.querySelectorAll('.toMenu').forEach(b => b.addEventListener('click', toMenu));
@@ -1228,12 +1057,12 @@ function drawRing(R, front) {
   const a0 = (front ? 0 : Math.PI) + (s < 0 ? Math.PI : 0);
   ctx.beginPath();
   ctx.ellipse(cx, cy, rx, ry, ang, a0, a0 + Math.PI);
-  ctx.lineWidth = RIM * 2; ctx.strokeStyle = front ? R.col : R.dark; ctx.stroke();
+  ctx.lineWidth = P.RIM * 2; ctx.strokeStyle = front ? R.col : R.dark; ctx.stroke();
   if (front) {
-    const sg = s < 0 ? -1 : 1, ox = Math.sin(ang) * RIM * 0.4 * sg, oy = -Math.cos(ang) * RIM * 0.4 * sg;
+    const sg = s < 0 ? -1 : 1, ox = Math.sin(ang) * P.RIM * 0.4 * sg, oy = -Math.cos(ang) * P.RIM * 0.4 * sg;
     ctx.beginPath();
     ctx.ellipse(cx + ox, cy + oy, rx, ry, ang, a0 + 0.35, a0 + Math.PI - 0.35);
-    ctx.lineWidth = RIM * 0.7; ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.stroke();
+    ctx.lineWidth = P.RIM * 0.7; ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.stroke();
   }
 }
 
@@ -1282,13 +1111,13 @@ function render(now) {
   for (const it of layers) {
     if (it.R) { drawRing(it.R, it.front); continue; }
     const k = it.k, g = pegs[k];
-    const pg = ctx.createLinearGradient(g.x - PEG_R, 0, g.x + PEG_R, 0);
+    const pg = ctx.createLinearGradient(g.x - P.PEG_R, 0, g.x + P.PEG_R, 0);
     pg.addColorStop(0, '#8d9bb0'); pg.addColorStop(0.4, '#ffffff'); pg.addColorStop(1, '#7a879b');
-    ctx.fillStyle = pg; rr(g.x - PEG_R, g.tip - PEG_R, PEG_R * 2, g.bottom - g.tip + PEG_R, PEG_R); ctx.fill();
-    ctx.fillStyle = '#dfe6ef'; rr(g.x - SHELF_W / 2, g.bottom - 3, SHELF_W, 7, 3.5); ctx.fill();
-    ctx.fillStyle = 'rgba(0,0,0,0.15)'; rr(g.x - SHELF_W / 2, g.bottom + 1, SHELF_W, 3, 1.5); ctx.fill();
+    ctx.fillStyle = pg; rr(g.x - P.PEG_R, g.tip - P.PEG_R, P.PEG_R * 2, g.bottom - g.tip + P.PEG_R, P.PEG_R); ctx.fill();
+    ctx.fillStyle = '#dfe6ef'; rr(g.x - P.SHELF_W / 2, g.bottom - 3, P.SHELF_W, 7, 3.5); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.15)'; rr(g.x - P.SHELF_W / 2, g.bottom + 1, P.SHELF_W, 3, 1.5); ctx.fill();
     if (mode === 'colors' && state !== 'menu') {
-      ctx.beginPath(); ctx.arc(g.x, g.tip, PEG_R + 2.5, 0, Math.PI * 2); ctx.fillStyle = DUO[k]; ctx.fill();
+      ctx.beginPath(); ctx.arc(g.x, g.tip, P.PEG_R + 2.5, 0, Math.PI * 2); ctx.fillStyle = DUO[k]; ctx.fill();
     }
   }
 
@@ -1428,7 +1257,7 @@ function frame(now) {
   if (dt > 0.1) dt = 0.1;
   if (state !== 'pause') {
     acc += dt;
-    while (acc >= STEP) { tick(STEP); acc -= STEP; }
+    while (acc >= P.STEP) { tick(P.STEP); acc -= P.STEP; }
   }
   audioUpdate();
   render(now);
@@ -1439,6 +1268,6 @@ pickGameAngle();
 layout();
 // В приложении ориентацию закрепляем сразу, без жеста игрока
 if (native) lockScreen();
-spawnRings(8, RING_D, false);
+spawnRings(8, P.RING_D, false);
 show('menu');
 requestAnimationFrame(frame);
