@@ -53,7 +53,7 @@
 <div id="menu" class="overlay">
   <h1>Кольца</h1>
   <p class="sub">Водная игра из детства</p>
-  <p class="intro">Жми внизу экрана слева или справа. Чем выше касание — тем сильнее струя. Резкий свайп вверх — сильный толчок. Насос выдыхается: отпусти, чтобы он снова набрал воду.</p>
+  <p class="intro">Жми слева или справа. Чем выше касание — тем сильнее струя. Резкий свайп вверх — сильный толчок. Насос выдыхается: отпусти, чтобы он снова набрал воду.</p>
   <div class="modes">
     <div class="mode"><button data-mode="classic">Классика</button><div class="small" id="best-classic"></div></div>
     <div class="mode"><button data-mode="colors" class="alt">Два цвета</button><div class="small" id="best-colors"></div></div>
@@ -1152,11 +1152,9 @@ function layout() {
   wasLand = land;
 }
 
-// Левая/правая половина экрана; чем выше касание, тем сильнее струя.
-// В портрете насосы — только две нижние четверти экрана, шкала силы — их высота; в ландшафте — вся высота.
+// Левая/правая половина экрана; чем выше касание, тем сильнее струя. Шкала силы — вся высота кадра.
 function strengthFromY(y) {
-  const span = sh > sw ? sh / 2 : sh;
-  return 0.18 + 0.82 * clamp((sh - y) / span, 0, 1);
+  return 0.18 + 0.82 * clamp((sh - y) / sh, 0, 1);
 }
 
 function press(side, y, id, strong) {
@@ -1179,7 +1177,7 @@ canvas.addEventListener('pointerdown', e => {
   e.preventDefault();
   initAudio();
   const [x, y] = toRoot(e);
-  if (state !== 'play' || (sh > sw && y < sh / 2)) return;
+  if (state !== 'play') return;
   press(x < sw / 2 ? 0 : 1, y, e.pointerId);
   try { canvas.setPointerCapture(e.pointerId); } catch (_) { }
 }, { passive: false });
@@ -1463,7 +1461,7 @@ function drawHud() {
 // Зона насоса для подсказки: полоска посреди своей половины, снизу (слабо) вверх (сильно)
 function tutStripe(side) {
   const x = sw * (side ? 0.75 : 0.25);
-  return sh > sw ? { x, y0: sh * 0.93, y1: sh * 0.56 } : { x, y0: sh * 0.9, y1: Math.max(hudH + 62, sh * 0.25) };
+  return { x, y0: sh * 0.9, y1: Math.max(hudH + 62, sh * 0.25) };
 }
 
 function drawTutorial() {
