@@ -5,14 +5,14 @@
 // внутренние переменные и функции и убирает комментарии и пробелы. Оптимизирующие преобразования (compress),
 // переименование свойств и source map выключены — формулы и порядок расчётов те же; это сверяет tools/verify-release.mjs.
 // node tools/build.mjs            — одна сборка
-// node tools/build.mjs --watch    — пересборка при изменении src/; с --serve ещё и сервер на http://localhost:8080
+// node tools/build.mjs --watch    — пересборка при изменении src/; с --serve ещё и сервер на http://localhost:5180 (порт — переменная PORT)
 import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import * as esbuild from 'esbuild';
 import { minify } from 'terser';
 
 const root = new URL('../', import.meta.url), dist = new URL('dist/', root), build = new URL('build/', root);
-const watch = process.argv.includes('--watch'), serve = process.argv.includes('--serve');
+const watch = process.argv.includes('--watch'), serve = process.argv.includes('--serve'), port = +(process.env.PORT || 5180);
 const opts = { entryPoints: [new URL('src/main.js', root).pathname.replace(/^\/(\w:)/, '$1')], bundle: true, format: 'iife', target: 'es2022', minify: false, legalComments: 'none', write: false };
 
 // Подстановка функцией: в коде бывают «$&» и «$1», строковая замена их бы испортила
@@ -44,6 +44,6 @@ if (!watch) {
     createServer((req, res) => {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
       res.end(readFileSync(new URL('index.dev.html', build)));
-    }).listen(8080, () => console.log('http://localhost:8080'));
+    }).listen(port, () => console.log(`http://localhost:${port}`));
   }
 }
