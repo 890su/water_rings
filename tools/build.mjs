@@ -8,12 +8,13 @@
 // node tools/build.mjs --watch    — пересборка при изменении src/; с --serve ещё и сервер на http://localhost:5180 (порт — переменная PORT)
 import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { fileURLToPath } from 'node:url';
 import * as esbuild from 'esbuild';
 import { minify } from 'terser';
 
 const root = new URL('../', import.meta.url), dist = new URL('dist/', root), build = new URL('build/', root);
 const watch = process.argv.includes('--watch'), serve = process.argv.includes('--serve'), port = +(process.env.PORT || 5180);
-const opts = { entryPoints: [new URL('src/main.js', root).pathname.replace(/^\/(\w:)/, '$1')], bundle: true, format: 'iife', target: 'es2022', minify: false, legalComments: 'none', write: false };
+const opts = { entryPoints: [fileURLToPath(new URL('src/main.js', root))], bundle: true, format: 'iife', target: 'es2022', minify: false, legalComments: 'none', write: false };
 
 // Подстановка функцией: в коде бывают «$&» и «$1», строковая замена их бы испортила
 const inject = (shell, code) => shell.replace('/*@GAME@*/', () => code);

@@ -1,62 +1,82 @@
 {
   "classic, portrait false, desktop": {
     "hash": "c8e974bb399748d9a90cd7afbaca59b6f9c41ca629e4a106aeadd26dc7a669f2",
-    "calls": 42766
+    "calls": 42766,
+    "state": "64454bb0cd6b33568a78a59c03ba537540a7f6d0d9b74832802397935fa3a2e0"
   },
   "classic, portrait false, touch": {
     "hash": "1a948f16e2528cc796ce30f5bc2819b99171a2d5ae3141adc260a8c6816960df",
-    "calls": 47365
+    "calls": 47365,
+    "state": "ddeffbce6f6aeddb77eeff5d332f2e7e1112f5418cddd53ac4dcae1663fecefa"
   },
   "classic, portrait true, desktop": {
     "hash": "c8e974bb399748d9a90cd7afbaca59b6f9c41ca629e4a106aeadd26dc7a669f2",
-    "calls": 42766
+    "calls": 42766,
+    "state": "c56c3c26a182b383a645c73212f6b1da6ddd860d214d7be101fdaf34ff65dce3"
   },
   "classic, portrait true, touch": {
     "hash": "1a948f16e2528cc796ce30f5bc2819b99171a2d5ae3141adc260a8c6816960df",
-    "calls": 47365
+    "calls": 47365,
+    "state": "50e3bfb7862ab2a43cae30205fed37da9d215067fc5520a508275278bf06ed1d"
   },
   "classic, long 30 s": {
     "hash": "de8b8a8ded8c08eda39ee7bdef75d8e720b8004ea7de5a14b1b919f21a0ab21e",
-    "calls": 1271713
+    "calls": 1271713,
+    "state": "b9b3f669dc21fe8e664a7d2ee0965ee8ba7b68d2a3b8929623ecf56677873b34"
   },
   "colors, portrait false, desktop": {
     "hash": "ba21b498b025143b2faf42addaad7d46915021ad3a428f67acf5dd61d3c8c033",
-    "calls": 43246
+    "calls": 43246,
+    "state": "64454bb0cd6b33568a78a59c03ba537540a7f6d0d9b74832802397935fa3a2e0"
   },
   "colors, portrait false, touch": {
     "hash": "4931a61ea885e5a008648ea4562ee18baf6c1313fc95dc9bd4b36244a0f88142",
-    "calls": 47917
+    "calls": 47917,
+    "state": "ddeffbce6f6aeddb77eeff5d332f2e7e1112f5418cddd53ac4dcae1663fecefa"
   },
   "colors, portrait true, desktop": {
     "hash": "ba21b498b025143b2faf42addaad7d46915021ad3a428f67acf5dd61d3c8c033",
-    "calls": 43246
+    "calls": 43246,
+    "state": "c56c3c26a182b383a645c73212f6b1da6ddd860d214d7be101fdaf34ff65dce3"
   },
   "colors, portrait true, touch": {
     "hash": "4931a61ea885e5a008648ea4562ee18baf6c1313fc95dc9bd4b36244a0f88142",
-    "calls": 47917
+    "calls": 47917,
+    "state": "50e3bfb7862ab2a43cae30205fed37da9d215067fc5520a508275278bf06ed1d"
   },
   "colors, long 30 s": {
     "hash": "69815db2ebaed65211c96ced1bea5d05ee13e600101fb8f6b4aba5cb697346cb",
-    "calls": 1286113
+    "calls": 1286113,
+    "state": "b9b3f669dc21fe8e664a7d2ee0965ee8ba7b68d2a3b8929623ecf56677873b34"
   },
   "waves, portrait false, desktop": {
     "hash": "123f7305a622326700b0fd1593d67e12c4b70fe40e2ba517194406b3fe666de2",
-    "calls": 40066
+    "calls": 40066,
+    "state": "64454bb0cd6b33568a78a59c03ba537540a7f6d0d9b74832802397935fa3a2e0"
   },
   "waves, portrait false, touch": {
     "hash": "7ddcc10f92d718688717a79344694229fcc7850ac4f8897626006e8d99232e46",
-    "calls": 44260
+    "calls": 44260,
+    "state": "ddeffbce6f6aeddb77eeff5d332f2e7e1112f5418cddd53ac4dcae1663fecefa"
   },
   "waves, portrait true, desktop": {
     "hash": "123f7305a622326700b0fd1593d67e12c4b70fe40e2ba517194406b3fe666de2",
-    "calls": 40066
+    "calls": 40066,
+    "state": "c56c3c26a182b383a645c73212f6b1da6ddd860d214d7be101fdaf34ff65dce3"
   },
   "waves, portrait true, touch": {
     "hash": "7ddcc10f92d718688717a79344694229fcc7850ac4f8897626006e8d99232e46",
-    "calls": 44260
+    "calls": 44260,
+    "state": "50e3bfb7862ab2a43cae30205fed37da9d215067fc5520a508275278bf06ed1d"
   },
   "waves, long 30 s": {
     "hash": "f3ed0d2c30dd961e7ba07a9ae3fdc55f54169f329cc04813f824b3bee76a189b",
-    "calls": 1190410
+    "calls": 1190410,
+    "state": "b9b3f669dc21fe8e664a7d2ee0965ee8ba7b68d2a3b8929623ecf56677873b34"
+  },
+  "waves, to the end 62 s": {
+    "hash": "fd6fa071e9513a8b6ded5ae6da9d3ccebc133e663969be103f1768f291110969",
+    "calls": 2431519,
+    "state": "637c9e88185b78a07e0e804e0a2f8767122f80227a621b172c5b4be4ee4a4645"
   }
 }

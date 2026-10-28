@@ -6,11 +6,23 @@ import assert from 'node:assert/strict';
 
 export const scriptOf = html => html.match(/<script>([\s\S]*?)<\/script>/)[1];
 
-// 12 коротких сценариев (режим × сохранённое портретное поле × сенсорный ввод) и 3 длинные партии по 30 с
+// 12 коротких сценариев (режим × сохранённое портретное поле × сенсорный ввод), 3 длинные партии по 30 с
+// и «Волны» до конца (60 с) — партия завершается и сохраняет рекорд
 export const SCENARIOS = [];
 for (const mode of ['classic', 'colors', 'waves']) {
   for (const portrait of [false, true]) for (const mobile of [false, true]) SCENARIOS.push({ name: `${mode}, portrait ${portrait}, ${mobile ? 'touch' : 'desktop'}`, mode, portrait, mobile });
   SCENARIOS.push({ name: `${mode}, long 30 s`, mode, long: true });
+}
+SCENARIOS.push({ name: 'waves, to the end 62 s', mode: 'waves', long: true, seconds: 62 });
+
+// Отпечаток интерфейса и хранилища после короткого сценария: тексты, стили, атрибуты, классы элементов и
+// сохранённые рекорды. Порядок создания элементов и ключей не важен — сортируем
+export function stateOf({ ui, storage }) {
+  const canon = v => v && typeof v === 'object'
+    ? Array.isArray(v) ? v.map(canon) : Object.fromEntries(Object.keys(v).sort().map(k => [k, canon(v[k])]))
+    : v;
+  const byKey = (a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0;
+  return createHash('sha256').update(JSON.stringify(canon([[...ui].sort(byKey), [...storage].sort(byKey)]))).digest('hex');
 }
 
 export function play(code, { mode, portrait = false, mobile = false, long = false, seconds = 30, press }, probe) {
@@ -29,7 +41,7 @@ export function play(code, { mode, portrait = false, mobile = false, long = fals
   const target = () => {
     const handlers = {}, classes = new Set();
     return {
-      handlers, style: {}, dataset: {}, attributes: {}, textContent: '', innerHTML: '',
+      handlers, classes, style: {}, dataset: {}, attributes: {}, textContent: '', innerHTML: '',
       setAttribute(k, v) { this.attributes[k] = v; },
       classList: {
         toggle: (k, on) => { if (on) classes.add(k); else classes.delete(k); },
@@ -64,6 +76,10 @@ export function play(code, { mode, portrait = false, mobile = false, long = fals
     localStorage: { getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, String(v)) },
     performance: { now: () => now }, requestAnimationFrame: fn => { raf = fn; }
   });
+  const uiState = () => ({
+    ui: [...elements].map(([id, e]) => [id, e.textContent, e.innerHTML, e.style, e.attributes, [...e.classes].sort()]),
+    storage: [...storage]
+  });
   runInContext(code, sandbox, { timeout: 5000 });
   const frames = n => { for (let i = 0; i < n; i++) { now += 1000 / 60; assert.equal(typeof raf, 'function'); raf(now); } };
   frames(3);
@@ -83,7 +99,7 @@ export function play(code, { mode, portrait = false, mobile = false, long = fals
     }
     // probe — выражение, вычисляемое в песочнице после партии (для исследования исходной версии; эталоны его не используют)
     if (probe) return { hash: hash.digest('hex'), calls, probe: runInContext(probe, sandbox) };
-    return { hash: hash.digest('hex'), calls };
+    return { hash: hash.digest('hex'), calls, ...uiState() };
   }
   el('c').fire('pointerdown', { pointerId: 1, clientX: 60, clientY: 740 });
   frames(12);
@@ -113,9 +129,5 @@ export function play(code, { mode, portrait = false, mobile = false, long = fals
   el('toMenu').fire('click'); frames(3);
   el('music-menu').fire('click'); el('sfx-menu').fire('click');
   el('howBtn').fire('click'); frames(3);
-  return {
-    hash: hash.digest('hex'), calls,
-    ui: [...elements].map(([id, e]) => [id, e.textContent, e.innerHTML, e.style, e.attributes]),
-    storage: [...storage]
-  };
+  return { hash: hash.digest('hex'), calls, ...uiState() };
 }

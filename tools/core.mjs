@@ -1,14 +1,16 @@
 // Общее для ботов: ядро игры без браузера и подмена параметров из командной строки.
-// Аргумент вида «ALIGN=20,G=200» → Object.assign(P, …); неизвестное имя — ошибка.
+// Аргумент вида «ALIGN=20,G=200» → Object.assign(P, …); неизвестное имя или не число вместо числа — ошибка.
 import { P } from '../src/core/params.js';
 import { setField } from '../src/core/field.js';
 
 export function applyOverrides(arg = '') {
   const overrides = Object.fromEntries(arg.split(',').filter(Boolean).map(s => s.split('=')));
   for (const [k, v] of Object.entries(overrides)) {
-    if (!(k in P)) throw new Error('no constant ' + k);
+    if (!Object.hasOwn(P, k)) throw new Error('no constant ' + k);
+    if (typeof P[k] === 'string') { P[k] = v.replace(/^'|'$/g, ''); continue; }
     const n = Number(v);
-    P[k] = Number.isNaN(n) ? v.replace(/^'|'$/g, '') : n;
+    if (Number.isNaN(n)) throw new Error(`${k}=${v}: нужно число`);
+    P[k] = n;
   }
   setField(P.START_FIELD);
   return overrides;
