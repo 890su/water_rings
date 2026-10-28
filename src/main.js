@@ -6,129 +6,23 @@ import { makePump, pumps, updatePump, inject, shelfShade, suck, resetPumps } fro
 import { grav, shake, motion, screenAxes, onMotion, enableMotion, resetMotion, swirl, updateMotion } from './core/motion.js';
 import { bubbles, sparks, specks, burst, updateFx, initSpecks } from './core/fx.js';
 import { hooks } from './core/hooks.js';
+import { G } from './core/state.js';
 import { PALETTE, DUO, world, makeRing, updateDepth, engaged, phiRest, zLim, spawnRings, integrateRing, collideStatic, holeHasPeg, flopRing, updateThread, SEG, segParams, pushRing, narrowRing, shiftZ, ringPair, collidePegs, physics, updateSpin, checkThreads } from './core/rings.js';
+import { actx, sfxBus, musicOn, sfxOn, audioVoices, MUSIC_STEP, MUSIC_NOTES, MUSIC_CHORDS, noteHz, soundRandom, initAudio, stopVoices, audioScene, audioTone, bubbleSound, soundCue, toggleSound, audioUpdate } from './audio.js';
 
 setField(P.START_FIELD);
 initSpecks();
 // Угол игрового кадра для датчиков наклона: на телефоне кадр привязан к корпусу, на компьютере — к экрану
 motion.angle = () => (touchDevice() ? gameAngle : screenAngle());
 // Ядро колец сообщает о надетом кольце — звук и искры
-hooks.playing = () => state === 'play';
+hooks.playing = () => G.state === 'play';
 hooks.onThreaded = R => {
-  const good = mode !== 'colors' || R.on === R.ci;
+  const good = G.mode !== 'colors' || R.on === R.ci;
   soundCue(good ? 'ring' : 'wrong');
   burst((R.a.x + R.b.x) / 2, (R.a.y + R.b.y) / 2, good ? R.col : '#ffffff', 8);
 };
 
 
-// ---------- Звук ----------
-// Автономный синтезатор: без файлов, шумовых петель и игрового Math.random.
-let actx = null, audioMaster = null, musicBus = null, sfxBus = null;
-let musicOn = true, sfxOn = true, musicStep = 0, nextMusic = 0, audioSeed = 173;
-const audioVoices = new Set(), nextBubble = [0, 0];
-const MUSIC_STEP = 0.375; // 80 BPM, спокойные восьмые
-const MUSIC_NOTES = [
-  76, 0, 79, 0, 81, 79, 0, 76, 74, 0, 72, 0, 74, 0, 0, 0,
-  72, 0, 76, 0, 79, 0, 81, 0, 79, 76, 0, 74, 72, 0, 0, 0,
-  74, 0, 77, 0, 81, 79, 0, 77, 76, 0, 74, 0, 72, 0, 0, 0,
-  74, 0, 79, 0, 83, 0, 81, 79, 77, 0, 74, 0, 79, 0, 0, 0
-];
-const MUSIC_CHORDS = [[48, 55, 64], [45, 52, 60], [53, 60, 69], [43, 50, 62]];
-try {
-  musicOn = localStorage.getItem('rings_music') !== '0';
-  sfxOn = localStorage.getItem('rings_sfx') !== '0';
-} catch (_) { }
-const noteHz = midi => 440 * Math.pow(2, (midi - 69) / 12);
-function soundRandom() {
-  audioSeed = (Math.imul(audioSeed, 1664525) + 1013904223) >>> 0;
-  return audioSeed / 4294967296;
-}
-function initAudio() {
-  try {
-    if (!actx) {
-      const Audio = window.AudioContext || window.webkitAudioContext;
-      if (!Audio) return;
-      actx = new Audio();
-      audioMaster = actx.createGain(); audioMaster.gain.value = 0.7;
-      musicBus = actx.createGain(); musicBus.gain.value = 0;
-      sfxBus = actx.createGain(); sfxBus.gain.value = sfxOn ? 0.6 : 0;
-      musicBus.connect(audioMaster); sfxBus.connect(audioMaster);
-      audioMaster.connect(actx.destination);
-      nextMusic = actx.currentTime + 0.04;
-    }
-    if (actx.state === 'suspended') actx.resume().catch(() => {});
-  } catch (e) { actx = null; }
-}
-function stopVoices(bus) {
-  for (const v of audioVoices) if (!bus || v.bus === bus) {
-    try { v.o.stop(); } catch (_) { }
-    v.o.disconnect(); v.g.disconnect(); audioVoices.delete(v);
-  }
-}
-function audioScene() {
-  if (!actx) return;
-  const quiet = document.hidden || state === 'pause', t = actx.currentTime;
-  audioMaster.gain.setTargetAtTime(quiet ? 0 : 0.7, t, 0.04);
-  musicBus.gain.setTargetAtTime(!quiet && musicOn && (state === 'play' || state === 'menu') ? 0.16 : 0, t, 0.15);
-  sfxBus.gain.setTargetAtTime(sfxOn ? 0.6 : 0, t, 0.02);
-  if (quiet || !musicOn || state === 'over') {
-    stopVoices(quiet ? null : musicBus);
-    nextMusic = t + 0.04;
-  }
-  if (document.hidden && actx.state === 'running') actx.suspend().catch(() => {});
-}
-function audioTone(freq, at, duration, volume, bus, endFreq = freq, attack = 0.012) {
-  if (!actx || document.hidden || state === 'pause' || audioVoices.size >= 24) return;
-  if ((bus === musicBus && !musicOn) || (bus === sfxBus && !sfxOn)) return;
-  const o = actx.createOscillator(), g = actx.createGain();
-  o.type = 'sine'; o.frequency.setValueAtTime(freq, at);
-  if (freq !== endFreq) o.frequency.exponentialRampToValueAtTime(endFreq, at + duration * 0.85);
-  g.gain.setValueAtTime(0.0001, at);
-  g.gain.exponentialRampToValueAtTime(volume, at + attack);
-  g.gain.exponentialRampToValueAtTime(0.0001, at + duration);
-  o.connect(g); g.connect(bus);
-  const voice = { o, g, bus }; audioVoices.add(voice);
-  o.onended = () => { o.disconnect(); g.disconnect(); audioVoices.delete(voice); };
-  o.start(at); o.stop(at + duration + 0.025);
-}
-function bubbleSound(side, strength = 0.5, small = false) {
-  if (!actx || !sfxOn || state !== 'play') return;
-  const t = actx.currentTime, f = (side ? 420 : 340) * (0.88 + soundRandom() * 0.32);
-  audioTone(f * 1.7, t, small ? 0.10 : 0.17, small ? 0.07 : 0.10 + strength * 0.045, sfxBus, f * 0.65);
-  if (!small) audioTone(f * 1.15, t + 0.065, 0.13, 0.065, sfxBus, f * 0.55);
-  nextBubble[side] = t + 0.15 + soundRandom() * 0.10;
-}
-function soundCue(name) {
-  if (!actx || !sfxOn) return;
-  const cues = {
-    start: [72, 76, 79], ring: [84, 91], wrong: [67, 64],
-    wave: [79, 84, 88, 91], win: [72, 76, 79, 84, 88],
-    end: [79, 76, 72], tap: [79]
-  };
-  const notes = cues[name] || cues.tap, t = actx.currentTime;
-  notes.forEach((n, i) => audioTone(noteHz(n), t + i * 0.09, name === 'win' ? 0.5 : 0.27,
-    name === 'ring' ? 0.12 : 0.08, sfxBus));
-}
-function audioUpdate() {
-  if (!actx || actx.state !== 'running' || document.hidden || state === 'pause') return;
-  const t = actx.currentTime;
-  if (musicOn && (state === 'play' || state === 'menu')) {
-    if (nextMusic < t - 0.2) nextMusic = t + 0.025; // Не догоняем пропущенные ноты.
-    while (nextMusic < t + 0.12) {
-      const step = musicStep % MUSIC_NOTES.length, note = MUSIC_NOTES[step];
-      if (note) audioTone(noteHz(note), nextMusic, 0.65, 0.095, musicBus);
-      if (step % 16 === 0) for (const n of MUSIC_CHORDS[step / 16]) {
-        audioTone(noteHz(n), nextMusic, 5.6, 0.035, musicBus, noteHz(n), 0.35);
-      }
-      nextMusic += MUSIC_STEP; musicStep++;
-    }
-  }
-  if (state === 'play' && sfxOn) for (let side = 0; side < 2; side++) {
-    const p = pumps[side];
-    if (p.held && p.flow > 0.08 && t >= nextBubble[side]) bubbleSound(side, p.flow, true);
-  }
-}
-// ---------- Конец звука ----------
 
 // ---------- Режимы и игра ----------
 const MODES = {
@@ -136,22 +30,22 @@ const MODES = {
   colors: { name: 'Два цвета' },
   waves: { name: 'Волны' }
 };
-let state = 'menu', mode = 'classic', game = null, toastText = '', toastT = 0;
+// Состояние партии — в src/core/state.js (G)
 
-function toast(t) { toastText = t; toastT = 1.8; }
+function toast(t) { G.toastText = t; G.toastT = 1.8; }
 
 
 function startGame(m) {
-  mode = m; initAudio(); resetFluid(); resetPumps(); resetMotion();
+  G.mode = m; initAudio(); resetFluid(); resetPumps(); resetMotion();
   if (motion.on) enableMotion();
   // Как держат телефон при старте — так кадр и закрепляем
   if (touchDevice()) { pickGameAngle(); layout(); lockScreen(); }
   world.rings = []; bubbles.length = 0; sparks.length = 0;
-  game = { t: 0, left: 0, score: 0, wave: 1, hold: 0, presses: 0 };
+  G.game = { t: 0, left: 0, score: 0, wave: 1, hold: 0, presses: 0 };
   if (m === 'classic') { spawnRings(8, P.RING_D, false); toast('Надень все кольца'); }
-  else if (m === 'colors') { game.left = 90; spawnRings(8, P.RING_D - 2, true); toast('Красные — влево, синие — вправо'); }
-  else { game.left = 60; spawnWave(); toast('Волна 1'); }
-  state = 'play';
+  else if (m === 'colors') { G.game.left = 90; spawnRings(8, P.RING_D - 2, true); toast('Красные — влево, синие — вправо'); }
+  else { G.game.left = 60; spawnWave(); toast('Волна 1'); }
+  G.state = 'play';
   if (!tutSeen() || tut.force) tutStart();
   show(null);
   soundCue('start');
@@ -174,52 +68,52 @@ function tutUpdate(dt) {
 }
 
 function spawnWave() {
-  const n = Math.min(10, 4 + game.wave), D = Math.max(P.RING_D - 12, P.RING_D + 2 - 3 * (game.wave - 1));
+  const n = Math.min(10, 4 + G.game.wave), D = Math.max(P.RING_D - 12, P.RING_D + 2 - 3 * (G.game.wave - 1));
   spawnRings(n, D, false);
 }
 
 function gameLogic(dt) {
-  game.t += dt;
-  if (mode === 'classic') {
-    game.hold = world.rings.every(r => r.on >= 0) ? game.hold + dt : 0;
-    if (game.hold > 1) {
-      const best = getBest('classic'), rec = best == null || game.t < best;
-      if (rec) setBest('classic', game.t);
-      endGame('Готово!', `Время: ${game.t.toFixed(1)} с · нажатий: ${game.presses}`, rec ? 'Новый рекорд!' : `Рекорд: ${best.toFixed(1)} с`);
+  G.game.t += dt;
+  if (G.mode === 'classic') {
+    G.game.hold = world.rings.every(r => r.on >= 0) ? G.game.hold + dt : 0;
+    if (G.game.hold > 1) {
+      const best = getBest('classic'), rec = best == null || G.game.t < best;
+      if (rec) setBest('classic', G.game.t);
+      endGame('Готово!', `Время: ${G.game.t.toFixed(1)} с · нажатий: ${G.game.presses}`, rec ? 'Новый рекорд!' : `Рекорд: ${best.toFixed(1)} с`);
     }
-  } else if (mode === 'colors') {
-    game.left -= dt;
+  } else if (G.mode === 'colors') {
+    G.game.left -= dt;
     const good = world.rings.filter(r => r.on === r.ci).length;
-    game.hold = good === world.rings.length ? game.hold + dt : 0;
-    if (game.hold > 1) {
-      const best = getBest('colors'), rec = best == null || game.left > best;
-      if (rec) setBest('colors', game.left);
-      endGame('Победа!', `Осталось времени: ${game.left.toFixed(1)} с · нажатий: ${game.presses}`, rec ? 'Новый рекорд!' : `Рекорд: ${best.toFixed(1)} с в запасе`);
-    } else if (game.left <= 0) {
-      game.left = 0;
-      endGame('Время вышло', `Правильно надето: ${good} из ${world.rings.length} · нажатий: ${game.presses}`, '');
+    G.game.hold = good === world.rings.length ? G.game.hold + dt : 0;
+    if (G.game.hold > 1) {
+      const best = getBest('colors'), rec = best == null || G.game.left > best;
+      if (rec) setBest('colors', G.game.left);
+      endGame('Победа!', `Осталось времени: ${G.game.left.toFixed(1)} с · нажатий: ${G.game.presses}`, rec ? 'Новый рекорд!' : `Рекорд: ${best.toFixed(1)} с в запасе`);
+    } else if (G.game.left <= 0) {
+      G.game.left = 0;
+      endGame('Время вышло', `Правильно надето: ${good} из ${world.rings.length} · нажатий: ${G.game.presses}`, '');
     }
   } else {
-    game.left -= dt;
-    game.hold = world.rings.every(r => r.on >= 0) ? game.hold + dt : 0;
-    if (game.hold > 0.6) {
+    G.game.left -= dt;
+    G.game.hold = world.rings.every(r => r.on >= 0) ? G.game.hold + dt : 0;
+    if (G.game.hold > 0.6) {
       for (const R of world.rings) burst((R.a.x + R.b.x) / 2, (R.a.y + R.b.y) / 2, R.col, 6);
-      game.score += world.rings.length;
-      game.wave++; game.left += 12; game.hold = 0;
+      G.game.score += world.rings.length;
+      G.game.wave++; G.game.left += 12; G.game.hold = 0;
       world.rings = []; spawnWave(); soundCue('wave');
-      toast(`Волна ${game.wave}  +12 с`);
-    } else if (game.left <= 0) {
-      game.left = 0;
-      const total = game.score + world.rings.filter(r => r.on >= 0).length;
+      toast(`Волна ${G.game.wave}  +12 с`);
+    } else if (G.game.left <= 0) {
+      G.game.left = 0;
+      const total = G.game.score + world.rings.filter(r => r.on >= 0).length;
       const best = getBest('waves'), rec = best == null || total > best;
       if (rec) setBest('waves', total);
-      endGame('Время вышло', `Колец надето: ${total} · дошёл до волны ${game.wave} · нажатий: ${game.presses}`, rec ? 'Новый рекорд!' : `Рекорд: ${best} колец`);
+      endGame('Время вышло', `Колец надето: ${total} · дошёл до волны ${G.game.wave} · нажатий: ${G.game.presses}`, rec ? 'Новый рекорд!' : `Рекорд: ${best} колец`);
     }
   }
 }
 
 function endGame(title, text, best) {
-  state = 'over';
+  G.state = 'over';
   resetPumps();
   document.getElementById('resTitle').textContent = title;
   document.getElementById('resText').textContent = text;
@@ -253,7 +147,7 @@ function demo(dt) {
 }
 
 function tick(dt) {
-  if (state === 'menu') demo(dt);
+  if (G.state === 'menu') demo(dt);
   updateMotion(dt);
   updatePump(pumps[0], dt); updatePump(pumps[1], dt);
   inject(0); inject(1);
@@ -261,8 +155,8 @@ function tick(dt) {
   for (let i = 0; i < P.SUB; i++) physics(dt / P.SUB);
   checkThreads(dt);
   updateFx(dt);
-  if (state === 'play') { gameLogic(dt); tutUpdate(dt); }
-  if (toastT > 0) toastT -= dt;
+  if (G.state === 'play') { gameLogic(dt); tutUpdate(dt); }
+  if (G.toastT > 0) G.toastT -= dt;
 }
 
 // ---------- Экран и управление ----------
@@ -358,7 +252,7 @@ function press(side, y, id, strong) {
   if (hap) hap.vibrate({ duration: ms }).catch(() => { });
   else if (navigator.vibrate) try { navigator.vibrate(ms); } catch (e) { }
   bubbleSound(side, p.base);
-  if (state === 'play') { game.presses++; if (tut.on) tut.presses[side]++; }
+  if (G.state === 'play') { G.game.presses++; if (tut.on) tut.presses[side]++; }
 }
 function release(side) {
   if (pumps[side].held) bubbleSound(side, 0.3, true);
@@ -369,7 +263,7 @@ canvas.addEventListener('pointerdown', e => {
   e.preventDefault();
   initAudio();
   const [x, y] = toRoot(e);
-  if (state !== 'play') return;
+  if (G.state !== 'play') return;
   press(x < sw / 2 ? 0 : 1, y, e.pointerId);
   try { canvas.setPointerCapture(e.pointerId); } catch (_) { }
 }, { passive: false });
@@ -393,13 +287,13 @@ document.addEventListener('gesturestart', e => e.preventDefault());
 
 const KEYS = { KeyA: 0, ArrowLeft: 0, KeyL: 1, ArrowRight: 1 };
 window.addEventListener('keydown', e => {
-  if (e.code === 'Escape' || e.code === 'KeyP') { if (state === 'play') pauseGame(); else if (state === 'pause') resumeGame(); return; }
+  if (e.code === 'Escape' || e.code === 'KeyP') { if (G.state === 'play') pauseGame(); else if (G.state === 'pause') resumeGame(); return; }
   // Без телефона: Q / E — наклон, пробел — стукнуть по аквариуму снизу
   if (e.code === 'KeyQ' || e.code === 'KeyE') { motion.keyTilt = e.code === 'KeyQ' ? -1 : 1; return; }
   if (e.code === 'Space') { e.preventDefault(); shake.x = (Math.random() - 0.5) * 1600; shake.y = -4000;
-    if (state === 'play') { initAudio(); bubbleSound(0, 1); bubbleSound(1, 1); } return; }
+    if (G.state === 'play') { initAudio(); bubbleSound(0, 1); bubbleSound(1, 1); } return; }
   const s = KEYS[e.code];
-  if (s === undefined || e.repeat || state !== 'play') return;
+  if (s === undefined || e.repeat || G.state !== 'play') return;
   initAudio();
   press(s, null, 'key', e.shiftKey);
 });
@@ -413,19 +307,19 @@ const overlays = { menu: document.getElementById('menu'), pause: document.getEle
 const pauseBtn = document.getElementById('pauseBtn');
 function show(name) {
   for (const k in overlays) overlays[k].classList.toggle('hidden', k !== name);
-  pauseBtn.classList.toggle('hidden', state !== 'play');
+  pauseBtn.classList.toggle('hidden', G.state !== 'play');
   if (name === 'menu') refreshBest();
   audioScene();
 }
-function pauseGame() { if (state !== 'play') return; state = 'pause'; resetPumps(); show('pause'); }
-function resumeGame() { initAudio(); state = 'play'; show(null); }
-function toMenu() { state = 'menu'; resetFluid(); resetPumps(); world.rings = []; spawnRings(8, P.RING_D, false); show('menu'); }
+function pauseGame() { if (G.state !== 'play') return; G.state = 'pause'; resetPumps(); show('pause'); }
+function resumeGame() { initAudio(); G.state = 'play'; show(null); }
+function toMenu() { G.state = 'menu'; resetFluid(); resetPumps(); world.rings = []; spawnRings(8, P.RING_D, false); show('menu'); }
 
 document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => startGame(b.dataset.mode)));
 document.querySelectorAll('.toMenu').forEach(b => b.addEventListener('click', toMenu));
 document.getElementById('resumeBtn').addEventListener('click', resumeGame);
-document.getElementById('restartBtn').addEventListener('click', () => startGame(mode));
-document.getElementById('againBtn').addEventListener('click', () => startGame(mode));
+document.getElementById('restartBtn').addEventListener('click', () => startGame(G.mode));
+document.getElementById('againBtn').addEventListener('click', () => startGame(G.mode));
 pauseBtn.addEventListener('click', pauseGame);
 document.getElementById('howBtn').addEventListener('click', () => { tut.force = true; startGame('classic'); });
 
@@ -465,7 +359,7 @@ function refreshSoundButtons() {
 for (const [selector, key] of [['.musicBtn', 'rings_music'], ['.sfxBtn', 'rings_sfx']]) {
   document.querySelectorAll(selector).forEach(b => b.addEventListener('click', () => {
     initAudio();
-    if (key === 'rings_music') musicOn = !musicOn; else sfxOn = !sfxOn;
+    toggleSound(key);
     try { localStorage.setItem(key, (key === 'rings_music' ? musicOn : sfxOn) ? '1' : '0'); } catch (_) { }
     if (!sfxOn) stopVoices(sfxBus);
     refreshSoundButtons(); audioScene();
@@ -478,9 +372,9 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) pause
 const appPlug = plug('App');
 if (appPlug) {
   appPlug.addListener('backButton', () => {
-    if (state === 'play') pauseGame();
-    else if (state === 'pause') resumeGame();
-    else if (state === 'over') toMenu();
+    if (G.state === 'play') pauseGame();
+    else if (G.state === 'pause') resumeGame();
+    else if (G.state === 'over') toMenu();
     else appPlug.minimizeApp();
   });
   appPlug.addListener('appStateChange', s => { if (!s.isActive) pauseGame(); });
@@ -566,7 +460,7 @@ function render(now) {
     ctx.fillStyle = pg; rr(g.x - P.PEG_R, g.tip - P.PEG_R, P.PEG_R * 2, g.bottom - g.tip + P.PEG_R, P.PEG_R); ctx.fill();
     ctx.fillStyle = '#dfe6ef'; rr(g.x - P.SHELF_W / 2, g.bottom - 3, P.SHELF_W, 7, 3.5); ctx.fill();
     ctx.fillStyle = 'rgba(0,0,0,0.15)'; rr(g.x - P.SHELF_W / 2, g.bottom + 1, P.SHELF_W, 3, 1.5); ctx.fill();
-    if (mode === 'colors' && state !== 'menu') {
+    if (G.mode === 'colors' && G.state !== 'menu') {
       ctx.beginPath(); ctx.arc(g.x, g.tip, P.PEG_R + 2.5, 0, Math.PI * 2); ctx.fillStyle = DUO[k]; ctx.fill();
     }
   }
@@ -593,14 +487,14 @@ function render(now) {
   rr(tankX - 4, tankY - 4, tankW + 8, tankH + 8, 18 * S + 4);
   ctx.lineWidth = 6; ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.stroke();
 
-  if (state === 'play' || state === 'pause') drawHud();
-  if (tut.on && state === 'play') drawTutorial();
+  if (G.state === 'play' || G.state === 'pause') drawHud();
+  if (tut.on && G.state === 'play') drawTutorial();
 
-  if (toastT > 0 && state === 'play') {
-    ctx.globalAlpha = Math.min(1, toastT / 0.4);
+  if (G.toastT > 0 && G.state === 'play') {
+    ctx.globalAlpha = Math.min(1, G.toastT / 0.4);
     ctx.font = `800 ${Math.round(clamp(tankW * 0.075, 18, 30))}px system-ui`; ctx.textAlign = 'center';
     ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(0,40,90,0.6)'; ctx.fillStyle = '#fff';
-    ctx.strokeText(toastText, sw / 2, tankY + tankH * 0.3); ctx.fillText(toastText, sw / 2, tankY + tankH * 0.3);
+    ctx.strokeText(G.toastText, sw / 2, tankY + tankH * 0.3); ctx.fillText(G.toastText, sw / 2, tankY + tankH * 0.3);
     ctx.globalAlpha = 1;
   }
 }
@@ -622,12 +516,12 @@ function drawHud() {
   drawPump(pumps[0], gl, gy, GAUGE_W, gh);
   drawPump(pumps[1], gr, gy, GAUGE_W, gh);
   let score;
-  if (mode === 'colors') score = `${world.rings.filter(r => r.on === r.ci).length}/${world.rings.length}`;
-  else if (mode === 'waves') score = `${game.score + world.rings.filter(r => r.on >= 0).length}`;
+  if (G.mode === 'colors') score = `${world.rings.filter(r => r.on === r.ci).length}/${world.rings.length}`;
+  else if (G.mode === 'waves') score = `${G.game.score + world.rings.filter(r => r.on >= 0).length}`;
   else score = `${world.rings.filter(r => r.on >= 0).length}/${world.rings.length}`;
-  const t = mode === 'classic' ? game.t.toFixed(1) : `${Math.floor(Math.ceil(game.left) / 60)}:${String(Math.ceil(game.left) % 60).padStart(2, '0')}`;
-  const name = mode === 'waves' ? `Волна ${game.wave}` : MODES[mode].name, taps = `Нажатий: ${game.presses}`;
-  const tcol = mode !== 'classic' && game.left < 10 ? '#ffe14d' : '#fff';
+  const t = G.mode === 'classic' ? G.game.t.toFixed(1) : `${Math.floor(Math.ceil(G.game.left) / 60)}:${String(Math.ceil(G.game.left) % 60).padStart(2, '0')}`;
+  const name = G.mode === 'waves' ? `Волна ${G.game.wave}` : MODES[G.mode].name, taps = `Нажатий: ${G.game.presses}`;
+  const tcol = G.mode !== 'classic' && G.game.left < 10 ? '#ffe14d' : '#fff';
   ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff';
   if (wide) {
     // Ландшафт: слева режим, время и нажатия, справа счёт
@@ -705,7 +599,7 @@ let last = performance.now(), acc = 0;
 function frame(now) {
   let dt = (now - last) / 1000; last = now;
   if (dt > 0.1) dt = 0.1;
-  if (state !== 'pause') {
+  if (G.state !== 'pause') {
     acc += dt;
     while (acc >= P.STEP) { tick(P.STEP); acc -= P.STEP; }
   }
